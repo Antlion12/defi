@@ -1,2 +1,2 @@
 # Antlion DeFi Repository
-A simple collection of DeFi related scripts written by a DeFi neophyte.
+This is the public view of a simple collection of DeFi related scripts (written by a DeFi neophyte).
