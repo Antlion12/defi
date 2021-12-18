@@ -50,6 +50,9 @@ def print_plp_balance(plp):
     print("Total position denominated in token terms:")
     for token in tokens:
         print(f"""* {token.count / token.fraction} {token.symbol}""")
+    print("-----")
+    for token in tokens:
+        print(f"""1 PLP token = {token.count / token.fraction / plp["balance"]} {token.symbol}""")
 
     print("\n\n")
 
