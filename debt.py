@@ -12,13 +12,11 @@
 # > ./debt.py --address=0x3f3e305c4ad49271ebda489dd43d2c8f027d2d41
 #
 # This script queries the Zapper API.
-#
-# TODO: rather than fetching protocol's debt summary, query individual debt
-# positions for a protocol to capture balances that don't show up in the summary
-# (e.g., Abracadabra debt positions don't show up in the summary).
 
 from absl import app
 from absl import flags
+from absl import logging
+from datetime import datetime
 import requests
 import json
 import pprint
@@ -27,49 +25,120 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("address", None, "Your wallet address.")
 flags.mark_flag_as_required("address")
 
-ZAPPER_BALANCE_URL = "https://api.zapper.fi/v1/balances?api_key=96e0cc51-a62e-42ca-acee-910ea7d2a241&addresses%5B%5D="
+API_KEY = "96e0cc51-a62e-42ca-acee-910ea7d2a241"
+ZAPPER_SUPPORTED_PROTOS_FMT = "https://api.zapper.fi/v1/protocols/balances/supported?api_key={api_key}&addresses%5B%5D={address}"
+ZAPPER_APP_BALANCE_FMT = "https://api.zapper.fi/v1/protocols/{app}/balances?network={network}&api_key={api_key}&addresses[]={address}"
 
-def parse_debts(results_text, address):
+
+# Returns list of apps associated with a wallet's supported protocols.
+class App(object):
+    def __init__(self, network_in, app_in):
+        self.network = network_in
+        self.app = app_in
+
+def parse_apps(address):
+    # Queries Zapper supported protocols API.
+    response = requests.get(
+        ZAPPER_SUPPORTED_PROTOS_FMT.format(api_key=API_KEY, address=address),
+        headers={"accept": "*/*"}
+    )
+    response.raise_for_status()
+    protocols = response.json()
+
+    # Saves network/app pairs in the results.
+    app_ids = []
+    for protocol in protocols:
+        logging.debug("Printing protocol")
+        logging.debug(json.dumps(protocol, indent=4))
+        for app in protocol["apps"]:
+            if app["appId"] != "tokens":
+                app_ids.append(App(protocol["network"], app["appId"]))
+
+    return app_ids
+
+
+# Constructs a key for the debts dictionary.
+def make_key(asset, token=None):
+    assert asset
+
+    # Collect fields for constructing key.
+    terms = []
+    if token:
+        terms.append(token["network"])
+    else:
+        terms.append(asset["network"])
+    terms.append(asset["appName"])
+    if "label" in asset:
+        terms.append(asset["label"])
+    elif "symbol" in asset:
+        terms.append(asset["symbol"])
+
+    key = " / ".join(terms)
+
+    if token:
+        if "label" in token:
+            key += f""" ({token["label"]})"""
+        elif "symbol" in token:
+            key += f""" ({token["symbol"]})"""
+
+    return key
+
+
+def parse_debts(address, apps):
     debts = {}
-    for line in results_text.splitlines():
-        if not line.startswith("data: "):
-            continue
-        _, content = line.split(" ", 1)
-        if content == "start" or content == "end":
-            continue
 
-        app_balance = json.loads(content)
-        network_id = app_balance["network"]
-        app_id = app_balance["appId"]
+    for app in apps:
+        # Queries Zapper for the balances in this app.
+        response = requests.get(
+            ZAPPER_APP_BALANCE_FMT.format(api_key=API_KEY,
+                                          address=address,
+                                          network=app.network,          
+                                          app=app.app),
+            headers={"accept": "*/*"}
+        )
+        response.raise_for_status()
 
-        # Get debt for this app.
-        balance_components = app_balance["balances"][address]["meta"]
-        debt_usd = 0
-        for component in balance_components:
-            if component["label"] == "Debt":
-                debt_usd = component["value"]
+        for product in response.json()[address]["products"]:
+            for asset in product["assets"]:
+                logging.debug(f"""Found asset: {json.dumps(asset, indent=4)}""")
 
-        if debt_usd:
-            debts[f"""{network_id}/{app_id}"""] = debt_usd
+                if "tokens" not in asset:
+                    if asset["balanceUSD"] < 0:
+                        logging.debug(f"""Found debt: {json.dumps(asset, indent=4)}""")
+                        # Found a debt position among asset tokens.
+                        key = make_key(asset)
+                        debts[key] = asset["balanceUSD"]
+                else:
+                    for token in asset["tokens"]:
+                        if token["balanceUSD"] < 0:
+                            logging.debug(f"""Found debt: {json.dumps(token, indent=4)}""")
+                            # Found a debt position among asset tokens.
+                            key = make_key(asset, token)
+                            debts[key] = token["balanceUSD"]
 
+    return debts
+
+
+def print_debts(debts_dict):
     total_debt = 0
-    for name, value in debts.items():
-        print(f"""{name}: {value} USD""")
+    for name, value in debts_dict.items():
+        print(f"""{name}: {value:,} USD""")
         total_debt += value
 
     print("---")
-    print(f"""Total Debt: {total_debt} USD""")
+    print(f"""Total Debt: {total_debt:,} USD""")
 
 
 def main(argv):
-    print("Making request...")
     address = FLAGS.address.lower()
-    result = requests.get(ZAPPER_BALANCE_URL + address, headers={"accept": "*/*"})
-    result.raise_for_status()
-    print("Done")
-    print("")
-
-    parse_debts(result.text, address)
+    print(f"""Debt Positions for {address} at {datetime.utcnow()} UTC""")
+    print("-----")
+    print("Parsing apps...")
+    apps = parse_apps(address)
+    print("Parsing debts...")
+    debts = parse_debts(address, apps)
+    print_debts(debts)
+    print("\n")
 
 if __name__ == "__main__":
     app.run(main)
