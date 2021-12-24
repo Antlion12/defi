@@ -107,26 +107,26 @@ def parse_debts(address, apps):
                         logging.debug(f"""Found debt: {json.dumps(asset, indent=4)}""")
                         # Found a debt position among asset tokens.
                         key = make_key(asset)
-                        debts[key] = asset["balanceUSD"]
+                        debts[key] = asset["balance"]
                 else:
                     for token in asset["tokens"]:
                         if token["balanceUSD"] < 0:
                             logging.debug(f"""Found debt: {json.dumps(token, indent=4)}""")
                             # Found a debt position among asset tokens.
                             key = make_key(asset, token)
-                            debts[key] = token["balanceUSD"]
+                            debts[key] = token["balance"]
 
     return debts
 
 
 def print_debts(debts_dict):
     total_debt = 0
-    for name, value in debts_dict.items():
-        print(f"""{name}: {value:,} USD""")
+    for name, value in sorted(debts_dict.items(), key=lambda x: -x[1]):
+        print(f"""{value:17,.2f} -- {name}""")
         total_debt += value
 
-    print("---")
-    print(f"""Total Debt: {total_debt:,} USD""")
+    print("-----------------")
+    print(f"""{total_debt:17,.2f} USD -- Total Debt""")
 
 
 def main(argv):
