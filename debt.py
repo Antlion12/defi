@@ -3,13 +3,13 @@
 # This script queries the debt positions for a given wallet address.
 #
 # Usage:
-# > ./debt.py --address=<YOUR WALLET ADDRESS>
+# > ./debt.py --address=<YOUR WALLET ADDRESS> [--tag=<HUMAN READABLE NAME>]
 #
 # Example (TetraNode's wallet):
-# > ./debt.py --address=0x9c5083dd4838e120dbeac44c052179692aa5dac5
+# > ./debt.py --address=0x9c5083dd4838e120dbeac44c052179692aa5dac5 --tag=TetraNode
 #
 # Example (DeFiGod's wallet):
-# > ./debt.py --address=0x3f3e305c4ad49271ebda489dd43d2c8f027d2d41
+# > ./debt.py --address=0x3f3e305c4ad49271ebda489dd43d2c8f027d2d41 --tag=DeFiGod
 #
 # This script queries the Zapper API.
 
@@ -23,11 +23,24 @@ import pprint
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("address", None, "Your wallet address.")
+flags.DEFINE_string("tag", None, "Human readable name for wallet.")
 flags.mark_flag_as_required("address")
 
 API_KEY = "96e0cc51-a62e-42ca-acee-910ea7d2a241"
 ZAPPER_SUPPORTED_PROTOS_FMT = "https://api.zapper.fi/v1/protocols/balances/supported?api_key={api_key}&addresses%5B%5D={address}"
 ZAPPER_APP_BALANCE_FMT = "https://api.zapper.fi/v1/protocols/{app}/balances?network={network}&api_key={api_key}&addresses[]={address}"
+MAX_ATTEMPTS = 3
+
+def fetch_url(url):
+    attempts = 0
+    while attempts < MAX_ATTEMPTS:
+        response = requests.get(url, headers={"accept": "*/*"})
+        if response.status_code == 200:
+            break
+        print("Retrying URL: {url}")
+        attempts += 1
+    response.raise_for_status()
+    return response
 
 
 # Returns list of apps associated with a wallet's supported protocols.
@@ -36,13 +49,10 @@ class App(object):
         self.network = network_in
         self.app = app_in
 
+
 def parse_apps(address):
     # Queries Zapper supported protocols API.
-    response = requests.get(
-        ZAPPER_SUPPORTED_PROTOS_FMT.format(api_key=API_KEY, address=address),
-        headers={"accept": "*/*"}
-    )
-    response.raise_for_status()
+    response = fetch_url(ZAPPER_SUPPORTED_PROTOS_FMT.format(api_key=API_KEY, address=address))
     protocols = response.json()
 
     # Saves network/app pairs in the results.
@@ -51,7 +61,9 @@ def parse_apps(address):
         logging.debug("Printing protocol")
         logging.debug(json.dumps(protocol, indent=4))
         for app in protocol["apps"]:
-            if app["appId"] != "tokens":
+            tags = app["meta"]["tags"]
+            if (app["appId"] != "tokens" and
+                any(tag in ["lending", "liquidity-pool", "fund-manager"] for tag in tags)):
                 app_ids.append(App(protocol["network"], app["appId"]))
 
     return app_ids
@@ -89,14 +101,12 @@ def parse_debts(address, apps):
 
     for app in apps:
         # Queries Zapper for the balances in this app.
-        response = requests.get(
+        response = fetch_url(
             ZAPPER_APP_BALANCE_FMT.format(api_key=API_KEY,
                                           address=address,
                                           network=app.network,          
                                           app=app.app),
-            headers={"accept": "*/*"}
         )
-        response.raise_for_status()
 
         for product in response.json()[address]["products"]:
             for asset in product["assets"]:
@@ -131,7 +141,8 @@ def print_debts(debts_dict):
 
 def main(argv):
     address = FLAGS.address.lower()
-    print(f"""Debt Positions for {address} at {datetime.utcnow()} UTC""")
+    tag = f""" ({FLAGS.tag})""" if FLAGS.tag else ""
+    print(f"""Debt Positions for {address}{tag} at {datetime.utcnow()} UTC""")
     print("-----")
     print("Parsing apps...")
     apps = parse_apps(address)
