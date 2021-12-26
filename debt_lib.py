@@ -229,7 +229,7 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
     relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
     print(f"""Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)""", end="", file=output)
-    print(f""" compared to {prev_debts.time} UTC ({time_diff} hours ago).""", file=output)
+    print(f""" compared to {prev_debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC ({time_diff} hours ago).""", file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
@@ -262,7 +262,7 @@ class DebtTracker(object):
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
         output = io.StringIO()
         if has_alert:
-            print(f"""Debt Positions for {address}{' ({})'.format(tag) if tag else ''} at {debts.time} UTC""", file=output)
+            print(f"""Debt Positions for {address}{' ({})'.format(tag) if tag else ''} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
             print(alert_message, file=output)
             print("```", file=output)
             _print_debts(debts, output)
@@ -270,7 +270,7 @@ class DebtTracker(object):
             _print_debt_comparison(prev_debts, debts, output)
             print("```=================", file=output)
         else:
-            print(f"""Finished querying debt for {address}{' ({})'.format(tag) if tag else ''} at {debts.time} UTC.""", file=output)
+            print(f"""Finished querying debt for {address}{' ({})'.format(tag) if tag else ''} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC.""", file=output)
             print(f"""Total debt was {debts.total_debt:,.2f} USD.""", file=output)
         message = output.getvalue()
     
