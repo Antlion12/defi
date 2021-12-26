@@ -258,20 +258,17 @@ class DebtTracker(object):
     
         debts = _query_new_debts(address, tag)
         prev_debts = _query_prev_debts(savefile)
-    
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
+
         output = io.StringIO()
+        print(f"""Debt Positions for {address}{' ({})'.format(tag) if tag else ''} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
         if has_alert:
-            print(f"""Debt Positions for {address}{' ({})'.format(tag) if tag else ''} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
             print(alert_message, file=output)
-            print("```", file=output)
-            _print_debts(debts, output)
-            print("", file=output)
-            _print_debt_comparison(prev_debts, debts, output)
-            print("```=================", file=output)
-        else:
-            print(f"""Finished querying debt for {address}{' ({})'.format(tag) if tag else ''} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC.""", file=output)
-            print(f"""Total debt was {debts.total_debt:,.2f} USD.""", file=output)
+        print("```", file=output)
+        _print_debts(debts, output)
+        print("", file=output)
+        _print_debt_comparison(prev_debts, debts, output)
+        print("```=================", file=output)
         message = output.getvalue()
     
         _write_debts(debts, savefile)
