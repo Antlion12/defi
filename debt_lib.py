@@ -15,8 +15,8 @@ from typing import Optional
 from typing import Tuple
 import csv
 import enum
+import httpx
 import io
-import requests
 import json
 
 API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
@@ -64,18 +64,13 @@ class DebtPosition(object):
         return result
 
 
-def _fetch_url(url: str) -> str:
+async def _fetch_url(url: str) -> str:
     attempts = 0
     result = ''
     print(f'Fetching url: {url}')
-    while attempts <= MAX_ATTEMPTS:
-        attempts += 1
-        try:
-            response = requests.get(url, headers={'accept': '*/*'})
-            result = str(response.text)
-        except requests.exceptions.ChunkedEncodingError as e:
-            print('Retrying due to ChunkedEncodingError')
-    return result
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
+    return str(response.text)
 
 
 # Constructs a key for the debts dictionary.
@@ -140,8 +135,8 @@ def _compute_total_debt(individual_debts: dict) -> float:
 
 # Fetches balances for the address, looks for debts, stores the debts in a
 # dictionary.
-def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
-    response = _fetch_url(
+async def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
+    response = await _fetch_url(
         ZAPPER_BALANCE_FMT.format(api_key=API_KEY,
                                   address=address)
     )
@@ -269,7 +264,7 @@ class DebtTracker(object):
         debts = _query_prev_debts(savefile)
 
         if not debts:
-            return self.update()
+            return False, f'No debts recorded yet for {self.get_name()}.'
 
         output = io.StringIO()
         print(
@@ -281,12 +276,12 @@ class DebtTracker(object):
 
         return False, message
 
-    def update(self) -> Tuple[bool, str]:
+    async def update(self) -> Tuple[bool, str]:
         address = self._address
         tag = self._tag
         savefile = self._savefile
 
-        debts = _query_new_debts(address, tag)
+        debts = await _query_new_debts(address, tag)
         prev_debts = _query_prev_debts(savefile)
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 

@@ -20,6 +20,7 @@
 from absl import app
 from absl import flags
 from debt_lib import DebtTracker
+import asyncio
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('address', None, 'Your wallet address.')
@@ -27,12 +28,16 @@ flags.DEFINE_string('tag', None, 'Human readable name for wallet.')
 flags.mark_flag_as_required('address')
 
 
+async def run_tracker(tracker):
+    _, message = await tracker.update()
+    print(message)
+
+
 def main(argv):
     address = FLAGS.address.lower()
     tag = FLAGS.tag
     tracker = DebtTracker(address, tag)
-    _, message = tracker.update()
-    print(message)
+    asyncio.run(run_tracker(tracker))
 
 
 if __name__ == '__main__':
