@@ -47,9 +47,15 @@ class Tracker(object):
 
 # An Alert specifies to which channel to send a message.
 class Alert(object):
-    def __init__(self, channel_name: str, message: str):
+    def __init__(self,
+                 channel_name: str,
+                 message: str,
+                 urgent: bool,
+                 wait_period_expired: bool):
         self.channel_name = channel_name
         self.message = message
+        self.urgent = urgent
+        self.wait_period_expired = wait_period_expired
 
 
 class AntlionDeFiBot(discord.Client):
@@ -96,7 +102,7 @@ class AntlionDeFiBot(discord.Client):
     def subscribe_to_channel(self, channel_name: str, channel_id: int):
         self._config['channels'][channel_name] = channel_id
 
-    def channel_is_subscribed(self, channel_name) -> bool:
+    def channel_is_subscribed(self, channel_name: str) -> bool:
         return channel_name in self._config['channels']
 
     def get_subscribed_channels(self) -> List[str]:
@@ -108,8 +114,8 @@ class AntlionDeFiBot(discord.Client):
     def get_token(self) -> str:
         return self._config['token']
 
-    def schedule_alert(self, channel_name, message):
-        self._alerts_queue.put(Alert(channel_name, message))
+    def schedule_alert(self, channel_name: str, message: str, urgent: bool, wait_period_expired: bool):
+        self._alerts_queue.put(Alert(channel_name, message, urgent, wait_period_expired))
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
@@ -124,7 +130,7 @@ class AntlionDeFiBot(discord.Client):
 
             if self.channel_is_subscribed(channel_name):
                 print(f'User {message.author} requested update.')
-                await message.channel.send(f'@{message.author} requested an update. Coming right up....')
+                await message.channel.send(f'{message.author.mention} requested an update. Coming right up....')
             else:
                 # This is a new subscription.
                 self.subscribe_to_channel(channel_name, channel_id)
@@ -136,7 +142,7 @@ class AntlionDeFiBot(discord.Client):
 
             # Schedule alert for this channel containing current messages.
             for tracker in self._trackers:
-                self.schedule_alert(channel_name, tracker.message)
+                self.schedule_alert(channel_name, tracker.message, False, False)
 
     @tasks.loop(seconds=300)
     async def update_task(self):
@@ -155,7 +161,7 @@ class AntlionDeFiBot(discord.Client):
             if has_alert or wait_period_expired:
                 # Raise alerts only if we have subscribed to channels.
                 for channel_name in self.get_subscribed_channels():
-                    self.schedule_alert(channel_name, message)
+                    self.schedule_alert(channel_name, message, has_alert, wait_period_expired)
 
     @update_task.before_loop
     async def before_update_task(self):
@@ -172,13 +178,18 @@ class AntlionDeFiBot(discord.Client):
             alert = queue.get()
             channel = self.get_channel(
                 self.get_channel_id_by_name(alert.channel_name))
+            if alert.urgent:
+                alert_role = discord.utils.get(channel.guild.roles, name="Degen")
+                if alert_role:
+                    await channel.send(f'{alert_role.mention}')
             await channel.send(alert.message)
             print(
                 f'Sent alert to {alert.channel_name} with the following message:')
             print(alert.message)
             queue.task_done()
             # If an alert was sent, update last alert time.
-            self._last_alert_time = datetime.now(timezone.utc)
+            if alert.urgent or alert.wait_period_expired:
+                self._last_alert_time = datetime.now(timezone.utc)
 
     @alert_task.before_loop
     async def before_alert_task(self):
