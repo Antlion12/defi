@@ -17,6 +17,10 @@
 
 from absl import app
 from absl import flags
+from datetime import datetime
+from datetime import MINYEAR
+from datetime import timedelta
+from datetime import timezone
 from debt_lib import DebtTracker
 from discord.ext import tasks
 from pathlib import Path
@@ -52,7 +56,11 @@ class AntlionDeFiBot(discord.Client):
         # Set of trackers to update on each loop of the background task.
         self._trackers = []
 
+        # Initialize alerts queue.
         self._alerts_queue = queue.Queue()
+
+        # Initialize last alert time to be min time UTC.
+        self._last_alert_time = datetime(MINYEAR, 1, 1, tzinfo=timezone.utc)
 
         # Set of channels to send alerts to.
         assert "config" in kwargs
@@ -138,7 +146,8 @@ class AntlionDeFiBot(discord.Client):
             print(f"""Updated tracker for {tracker.tracker.get_name()} with the following message:""")
             print(message)
 
-            if has_alert:
+            wait_period_expired = (datetime.now(timezone.utc) - self._last_alert_time) >= timedelta(hours=4)
+            if has_alert or wait_period_expired:
                 # Raise alerts only if we have subscribed to channels.
                 for channel_name in self.get_subscribed_channels():
                     self.schedule_alert(channel_name, message)
@@ -152,7 +161,7 @@ class AntlionDeFiBot(discord.Client):
     @tasks.loop(seconds=10)
     async def alert_task(self):
         queue = self._alerts_queue
-        print(f"""Running alert task with {queue.qsize()} alerts.""")
+        print(f"""Running alert task with {queue.qsize()} alerts. Last alert time: {self._last_alert_time.strftime("%Y-%m-%d %H:%M:%S")} UTC""")
         while not queue.empty():
             alert = queue.get()
             channel = self.get_channel(self.get_channel_id_by_name(alert.channel_name))
@@ -160,6 +169,8 @@ class AntlionDeFiBot(discord.Client):
             print(f"""Sent alert to {alert.channel_name} with the following message:""")
             print(alert.message)
             queue.task_done()
+            # If an alert was sent, update last alert time.
+            self._last_alert_time = datetime.now(timezone.utc)
 
     @alert_task.before_loop
     async def before_alert_task(self):
