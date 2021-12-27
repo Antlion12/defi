@@ -159,13 +159,11 @@ def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
 
 
 def _print_debts(debts: DebtPosition, output):
-    total_debt = 0
     for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]):
         print(f"""{value:17,.2f} -- {name}""", file=output)
-        total_debt += value
 
     print("-----------------", file=output)
-    print(f"""{total_debt:17,.2f} USD -- Total Debt""", file=output)
+    print(f"""{debts.total_debt:17,.2f} USD -- Total Debt""", file=output)
     return 
 
 
@@ -250,6 +248,30 @@ class DebtTracker(object):
                 writer = csv.DictWriter(csvfile, SAVEFILE_FIELDS)
                 writer.writeheader()
 
+    def get_name(self) -> str:
+        name = self._address
+        if self._tag:
+            name += f""" ({self._tag})"""
+        return name
+
+    def get_current(self) -> Tuple[bool, str]:
+        address = self._address
+        tag = self._tag
+        savefile = self._savefile
+
+        debts = _query_prev_debts(savefile)
+
+        if not debts:
+            return self.update()
+
+        output = io.StringIO()
+        print(f"""Debt Positions for {self.get_name()} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
+        print("```", file=output)
+        _print_debts(debts, output)
+        print("```=================", file=output)
+        message = output.getvalue()
+
+        return False, message
 
     def update(self) -> Tuple[bool, str]:
         address = self._address
@@ -261,7 +283,7 @@ class DebtTracker(object):
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 
         output = io.StringIO()
-        print(f"""Debt Positions for {address}{' ({})'.format(tag) if tag else ''} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
+        print(f"""Debt Positions for {self.get_name()} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
         if has_alert:
             print(alert_message, file=output)
         print("```", file=output)
