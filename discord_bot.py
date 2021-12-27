@@ -38,10 +38,18 @@ flags.DEFINE_string('config', 'config.json',
 
 TIME_FMT = '%Y-%m-%d %H:%M:%S'
 
+# Max amount of time to wait between broadcasting updates.
+WAIT_PERIOD_HOURS = 0
+WAIT_PERIOD_MINUTES = 30
+
 
 class Tracker(object):
-    def __init__(self, tracker: DebtTracker, message: str):
-        self.tracker = tracker
+    def __init__(self,
+                 debt_tracker: DebtTracker,
+                 last_alert_time: datetime,
+                 message: str):
+        self.debt_tracker = debt_tracker
+        self.last_alert_time = last_alert_time
         self.message = message
 
 
@@ -49,10 +57,12 @@ class Tracker(object):
 class Alert(object):
     def __init__(self,
                  channel_name: str,
+                 tracker: Tracker,
                  message: str,
                  urgent: bool,
                  wait_period_expired: bool):
         self.channel_name = channel_name
+        self.tracker = tracker
         self.message = message
         self.urgent = urgent
         self.wait_period_expired = wait_period_expired
@@ -68,9 +78,6 @@ class AntlionDeFiBot(discord.Client):
         # Initialize alerts queue.
         self._alerts_queue = queue.Queue()
 
-        # Initialize last alert time to be min time UTC.
-        self._last_alert_time = datetime(MINYEAR, 1, 1, tzinfo=timezone.utc)
-
         # Set of channels to send alerts to.
         assert 'config' in kwargs
         self._config_file = kwargs['config']
@@ -80,9 +87,14 @@ class AntlionDeFiBot(discord.Client):
         self.update_task.start()
         self.alert_task.start()
 
-    def add_tracker(self, tracker: DebtTracker):
-        _, message = tracker.get_current()
-        self._trackers.append(Tracker(tracker, message))
+    def add_tracker(self, debt_tracker: DebtTracker):
+        # Initialize last alert time to be min time UTC.
+        last_alert_time = datetime(MINYEAR, 1, 1, tzinfo=timezone.utc)
+        # Get last recorded message from DebtTracker.
+        _, message = debt_tracker.get_current()
+
+        self._trackers.append(Tracker(debt_tracker, last_alert_time, message))
+
         print('Current debt position for tracker:')
         print(self._trackers[-1].message)
 
@@ -114,8 +126,14 @@ class AntlionDeFiBot(discord.Client):
     def get_token(self) -> str:
         return self._config['token']
 
-    def schedule_alert(self, channel_name: str, message: str, urgent: bool, wait_period_expired: bool):
-        self._alerts_queue.put(Alert(channel_name, message, urgent, wait_period_expired))
+    def schedule_alert(self,
+                       channel_name: str,
+                       tracker: Tracker,
+                       message: str,
+                       urgent: bool,
+                       wait_period_expired: bool):
+        self._alerts_queue.put(
+            Alert(channel_name, tracker, message, urgent, wait_period_expired))
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
@@ -142,44 +160,48 @@ class AntlionDeFiBot(discord.Client):
 
             # Schedule alert for this channel containing current messages.
             for tracker in self._trackers:
-                self.schedule_alert(channel_name, tracker.message, False, False)
+                self.schedule_alert(channel_name, tracker,
+                                    tracker.message, False, False)
 
     @tasks.loop(seconds=300)
     async def update_task(self):
         print('Running update task.')
         for tracker in self._trackers:
-            await asyncio.sleep(0)
-            has_alert, message = tracker.tracker.update()
-            await asyncio.sleep(0)
+            has_alert, message = await tracker.debt_tracker.update()
             tracker.message = message
             print(
-                f'Updated tracker for {tracker.tracker.get_name()} with the following message:')
+                f'Updated tracker for {tracker.debt_tracker.get_name()} with the following message:')
             print(message)
 
-            wait_period_expired = (datetime.now(
-                timezone.utc) - self._last_alert_time) >= timedelta(hours=4)
+            wait_period_expired = ((datetime.now(timezone.utc) - tracker.last_alert_time)
+                                   >= timedelta(hours=WAIT_PERIOD_HOURS, minutes=WAIT_PERIOD_MINUTES))
             if has_alert or wait_period_expired:
                 # Raise alerts only if we have subscribed to channels.
                 for channel_name in self.get_subscribed_channels():
-                    self.schedule_alert(channel_name, message, has_alert, wait_period_expired)
+                    self.schedule_alert(
+                        channel_name, tracker, message, has_alert, wait_period_expired)
 
     @update_task.before_loop
     async def before_update_task(self):
         # Wait for bot to log in.
         await self.wait_until_ready()
-        await asyncio.sleep(20)
 
     @tasks.loop(seconds=10)
     async def alert_task(self):
         queue = self._alerts_queue
-        print(
-            f'Running alert task with {queue.qsize()} alerts. Last alert time: {self._last_alert_time.strftime(TIME_FMT)} UTC')
+
+        print(f'Running alert task with {queue.qsize()} alerts.')
+        for tracker in self._trackers:
+            print(
+                f'Last alert time for {tracker.debt_tracker.get_name()}: {tracker.last_alert_time.strftime(TIME_FMT)} UTC')
+
         while not queue.empty():
             alert = queue.get()
             channel = self.get_channel(
                 self.get_channel_id_by_name(alert.channel_name))
             if alert.urgent:
-                alert_role = discord.utils.get(channel.guild.roles, name="Degen")
+                alert_role = discord.utils.get(
+                    channel.guild.roles, name='Degen')
                 if alert_role:
                     await channel.send(f'{alert_role.mention}')
             await channel.send(alert.message)
@@ -187,9 +209,9 @@ class AntlionDeFiBot(discord.Client):
                 f'Sent alert to {alert.channel_name} with the following message:')
             print(alert.message)
             queue.task_done()
-            # If an alert was sent, update last alert time.
+            # If an alert was sent, update last alert time for the tracker.
             if alert.urgent or alert.wait_period_expired:
-                self._last_alert_time = datetime.now(timezone.utc)
+                alert.tracker.last_alert_time = datetime.now(timezone.utc)
 
     @alert_task.before_loop
     async def before_alert_task(self):
