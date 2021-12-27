@@ -19,86 +19,88 @@ import io
 import requests
 import json
 
-API_KEY = "96e0cc51-a62e-42ca-acee-910ea7d2a241"
-ZAPPER_BALANCE_FMT = "https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}"
+API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
+ZAPPER_BALANCE_FMT = 'https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}'
 MAX_ATTEMPTS = 3
-SAVEFILE_FIELDS = ["time", "address", "tag", "total_debt", "individual_debts"]
+SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
 LARGE_CHANGE_THRESHOLD = 0.05
-TIME_FMT = "%Y-%m-%d %H:%M:%S%z"
+TIME_STORAGE_FMT = '%Y-%m-%d %H:%M:%S%z'
+TIME_DISPLAY_FMT = '%Y-%m-%d %H:%M:%S'
+
 
 class DebtPosition(object):
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
-            if key == "time":
+            if key == 'time':
                 self.time = value
-            elif key == "address":
+            elif key == 'address':
                 self.address = value
-            elif key == "tag":
+            elif key == 'tag':
                 self.tag = value
-            elif key == "total_debt":
+            elif key == 'total_debt':
                 self.total_debt = value
-            elif key == "individual_debts":
+            elif key == 'individual_debts':
                 self.individual_debts = value
-            elif key == "csv_row":
+            elif key == 'csv_row':
                 self.from_csv_row(value)
                 break
             else:
-                logging.fatal("Ineligible key: " + key)
+                logging.fatal('Ineligible key: ' + key)
 
     def from_csv_row(self, dict_in: dict):
-        self.time = datetime.strptime(dict_in["time"], TIME_FMT)
-        self.address = dict_in["address"]
-        self.tag = dict_in["tag"]
-        self.total_debt = float(dict_in["total_debt"])
-        self.individual_debts = json.loads(dict_in["individual_debts"])
+        self.time = datetime.strptime(dict_in['time'], TIME_STORAGE_FMT)
+        self.address = dict_in['address']
+        self.tag = dict_in['tag']
+        self.total_debt = float(dict_in['total_debt'])
+        self.individual_debts = json.loads(dict_in['individual_debts'])
 
     def to_csv_row(self) -> dict:
         result = {}
-        result["time"] = self.time.strftime(TIME_FMT)
-        result["address"] = self.address
-        result["tag"] = self.tag
-        result["total_debt"] = self.total_debt
-        result["individual_debts"] = json.dumps(self.individual_debts)
+        result['time'] = self.time.strftime(TIME_STORAGE_FMT)
+        result['address'] = self.address
+        result['tag'] = self.tag
+        result['total_debt'] = self.total_debt
+        result['individual_debts'] = json.dumps(self.individual_debts)
         return result
 
 
 def _fetch_url(url: str) -> str:
     attempts = 0
-    result = ""
-    print(f"""Fetching url: {url}""")
+    result = ''
+    print(f'Fetching url: {url}')
     while attempts <= MAX_ATTEMPTS:
         attempts += 1
         try:
-            response = requests.get(url, headers={"accept": "*/*"})
+            response = requests.get(url, headers={'accept': '*/*'})
             result = str(response.text)
         except requests.exceptions.ChunkedEncodingError as e:
-            print("Retrying due to ChunkedEncodingError")
-    return result 
+            print('Retrying due to ChunkedEncodingError')
+    return result
 
 
 # Constructs a key for the debts dictionary.
-def _make_key(asset: dict, token:Optional[str]) -> str:
+def _make_key(asset: dict, token: Optional[str]) -> str:
     assert asset
 
     # Collect fields for constructing key.
     terms = []
     if token:
-        terms.append(token["network"])
+        terms.append(token['network'])
     else:
-        terms.append(asset["network"])
-    terms.append(asset["appId"])
-    if "label" in asset:
-        terms.append(asset["label"])
-    elif "symbol" in asset:
-        terms.append(asset["symbol"])
+        terms.append(asset['network'])
+    terms.append(asset['appId'])
+    if 'label' in asset:
+        terms.append(asset['label'])
+    elif 'symbol' in asset:
+        terms.append(asset['symbol'])
 
-    key = " / ".join(terms)
+    key = ' / '.join(terms)
 
     if token:
-        if "label" in token:
-            key += f""" ({token["label"]})"""
-        elif "symbol" in token:
-            key += f""" ({token["symbol"]})"""
+        if 'label' in token:
+            key += f" ({token['label']})"
+        elif 'symbol' in token:
+            key += f" ({token['symbol']})"
 
     return key
 
@@ -108,24 +110,28 @@ def _make_key(asset: dict, token:Optional[str]) -> str:
 #   address: Wallet address for which we are scraping debt balances.
 #   debts: An output dictionary for which we store debt balances (key being the
 #       debt description, value being the debt value in tokens).
-def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
-    for product in app_balance["balances"][address]["products"]:
-        for asset in product["assets"]:
-            logging.debug(f"""Found asset: {json.dumps(asset, indent=4)}""")
 
-            if "tokens" not in asset:
-                if asset["balanceUSD"] < 0:
-                    logging.debug(f"""Found debt: {json.dumps(asset, indent=4)}""")
+
+def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
+    for product in app_balance['balances'][address]['products']:
+        for asset in product['assets']:
+            logging.debug(f'Found asset: {json.dumps(asset, indent=4)}')
+
+            if 'tokens' not in asset:
+                if asset['balanceUSD'] < 0:
+                    logging.debug(
+                        f'Found debt: {json.dumps(asset, indent=4)}')
                     # Found a debt position among asset tokens.
                     key = _make_key(asset)
-                    debts[key] = asset["balance"]
+                    debts[key] = asset['balance']
             else:
-                for token in asset["tokens"]:
-                    if token["balanceUSD"] < 0:
-                        logging.debug(f"""Found debt: {json.dumps(token, indent=4)}""")
+                for token in asset['tokens']:
+                    if token['balanceUSD'] < 0:
+                        logging.debug(
+                            f'Found debt: {json.dumps(token, indent=4)}')
                         # Found a debt position among asset tokens.
                         key = _make_key(asset, token)
-                        debts[key] = token["balance"]
+                        debts[key] = token['balance']
 
 
 def _compute_total_debt(individual_debts: dict) -> float:
@@ -139,14 +145,14 @@ def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
         ZAPPER_BALANCE_FMT.format(api_key=API_KEY,
                                   address=address)
     )
-    logging.debug("Query Balances Response:\n" + response)
+    logging.debug('Query Balances Response:\n' + response)
 
     debts = {}
     for line in response.splitlines():
-        if not line.startswith("data: "):
+        if not line.startswith('data: '):
             continue
-        _, content = line.split(" ", 1)
-        if content == "start" or content == "end":
+        _, content = line.split(' ', 1)
+        if content == 'start' or content == 'end':
             continue
 
         app_balance = json.loads(content)
@@ -161,16 +167,16 @@ def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
 
 def _print_debts(debts: DebtPosition, output):
     for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]):
-        print(f"""{value:17,.2f} -- {name}""", file=output)
+        print(f'{value:17,.2f} -- {name}', file=output)
 
-    print("-----------------", file=output)
-    print(f"""{debts.total_debt:17,.2f} USD -- Total Debt""", file=output)
-    return 
+    print('-----------------', file=output)
+    print(f'{debts.total_debt:17,.2f} USD -- Total Debt', file=output)
+    return
 
 
 def _get_savefile(address: str, tag: Optional[str]) -> str:
-    filename = "-".join([address, tag]) if tag else address
-    return f"""{filename}.csv"""
+    filename = '-'.join([address, tag]) if tag else address
+    return f'{filename}.csv'
 
 
 def _query_prev_debts(savefile: str) -> Optional[DebtPosition]:
@@ -200,18 +206,18 @@ def _get_relative_debt_change(prev_debts: DebtPosition,
 def _get_alert_message(prev_debts: DebtPosition,
                        debts: DebtPosition) -> Tuple[bool, str]:
     if not prev_debts:
-        return True, "Starting a new debt log."
+        return True, 'Starting a new debt log.'
 
     change = _get_debt_change(prev_debts, debts)
     relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
 
     if relative_change >= LARGE_CHANGE_THRESHOLD:
-        return True, f"""💳🤝💵 Significant INCREASE in debt. Bullish."""
+        return True, f'💳🤝💵 Significant INCREASE in debt. Bullish.'
     elif relative_change <= -LARGE_CHANGE_THRESHOLD:
-        return True, f"""🚨🚨🚨🚨🚨 @Degen ALERT: Significant REDUCTION in debt. We gonna get rekt?"""
+        return True, f'🚨🚨🚨🚨🚨 @Degen ALERT: Significant REDUCTION in debt. We gonna get rekt?'
 
-    return False, ""
+    return False, ''
 
 
 def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output):
@@ -225,8 +231,10 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
     change = _get_debt_change(prev_debts, debts)
     relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
-    print(f"""Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)""", end="", file=output)
-    print(f""" compared to {prev_debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC ({time_diff} hours ago).""", file=output)
+    print(
+        f'Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)', end='', file=output)
+    print(
+        f' compared to {prev_debts.time.strftime(TIME_DISPLAY_FMT)} UTC ({time_diff} hours ago).', file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
@@ -250,7 +258,7 @@ class DebtTracker(object):
     def get_name(self) -> str:
         name = self._address
         if self._tag:
-            name += f""" ({self._tag})"""
+            name += f' ({self._tag})'
         return name
 
     def get_current(self) -> Tuple[bool, str]:
@@ -264,10 +272,11 @@ class DebtTracker(object):
             return self.update()
 
         output = io.StringIO()
-        print(f"""Debt Positions for {self.get_name()} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
-        print("```", file=output)
+        print(
+            f'Debt Positions for {self.get_name()} at {debts.time.strftime(TIME_DISPLAY_FMT)} UTC', file=output)
+        print('```', file=output)
         _print_debts(debts, output)
-        print("```=================", file=output)
+        print('```=================', file=output)
         message = output.getvalue()
 
         return False, message
@@ -276,22 +285,23 @@ class DebtTracker(object):
         address = self._address
         tag = self._tag
         savefile = self._savefile
-    
+
         debts = _query_new_debts(address, tag)
         prev_debts = _query_prev_debts(savefile)
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 
         output = io.StringIO()
-        print(f"""Debt Positions for {self.get_name()} at {debts.time.strftime("%Y-%m-%d %H:%M:%S")} UTC""", file=output)
+        print(
+            f'Debt Positions for {self.get_name()} at {debts.time.strftime(TIME_DISPLAY_FMT)} UTC', file=output)
         if has_alert:
             print(alert_message, file=output)
-        print("```", file=output)
+        print('```', file=output)
         _print_debts(debts, output)
-        print("", file=output)
+        print('', file=output)
         _print_debt_comparison(prev_debts, debts, output)
-        print("```=================", file=output)
+        print('```=================', file=output)
         message = output.getvalue()
-    
+
         _write_debts(debts, savefile)
 
         return has_alert, message

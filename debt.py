@@ -22,9 +22,9 @@ from absl import flags
 from debt_lib import DebtTracker
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("address", None, "Your wallet address.")
-flags.DEFINE_string("tag", None, "Human readable name for wallet.")
-flags.mark_flag_as_required("address")
+flags.DEFINE_string('address', None, 'Your wallet address.')
+flags.DEFINE_string('tag', None, 'Human readable name for wallet.')
+flags.mark_flag_as_required('address')
 
 
 def main(argv):
@@ -35,5 +35,5 @@ def main(argv):
     print(message)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(main)
