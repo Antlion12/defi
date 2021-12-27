@@ -9,7 +9,7 @@
 from absl import flags
 from absl import logging
 from datetime import datetime
-from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 from typing import Optional
 from typing import Tuple
@@ -151,7 +151,7 @@ def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
         app_balance = json.loads(content)
         _parse_app_balance(app_balance, address, debts)
 
-    return DebtPosition(time=datetime.utcnow(),
+    return DebtPosition(time=datetime.now(timezone.utc),
                         address=address,
                         tag=tag,
                         total_debt=_compute_total_debt(debts),
@@ -209,8 +209,6 @@ def _get_alert_message(prev_debts: DebtPosition,
         return True, f"""💳🤝💵 Significant INCREASE in debt. Bullish."""
     elif relative_change <= -LARGE_CHANGE_THRESHOLD:
         return True, f"""🚨🚨🚨🚨🚨 @Degen ALERT: Significant REDUCTION in debt. We gonna get rekt?"""
-    elif time_diff >= timedelta(hours=4):
-        return True, f"""{time_diff} hours have elapsed since last update."""
 
     return False, ""
 
