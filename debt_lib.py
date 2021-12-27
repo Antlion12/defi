@@ -68,9 +68,15 @@ async def _fetch_url(url: str) -> str:
     attempts = 0
     result = ''
     print(f'Fetching url: {url}')
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
-    return str(response.text)
+    while attempts <= MAX_ATTEMPTS:
+        attempts += 1
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
+            result = str(response.text)
+        except requests.exceptions.ChunkedEncodingError as e:
+            print('Retrying due to ChunkedEncodingError')
+    return result
 
 
 # Constructs a key for the debts dictionary.
