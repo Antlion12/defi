@@ -24,7 +24,7 @@ ZAPPER_BALANCE_FMT = "https://api.zapper.fi/v1/balances?api_key={api_key}&addres
 MAX_ATTEMPTS = 3
 SAVEFILE_FIELDS = ["time", "address", "tag", "total_debt", "individual_debts"]
 LARGE_CHANGE_THRESHOLD = 0.05
-
+TIME_FMT = "%Y-%m-%d %H:%M:%S%z"
 
 class DebtPosition(object):
     def __init__(self, **kwargs):
@@ -46,7 +46,7 @@ class DebtPosition(object):
                 logging.fatal("Ineligible key: " + key)
 
     def from_csv_row(self, dict_in: dict):
-        self.time = datetime.strptime(dict_in["time"], "%Y-%m-%d %H:%M:%S")
+        self.time = datetime.strptime(dict_in["time"], TIME_FMT)
         self.address = dict_in["address"]
         self.tag = dict_in["tag"]
         self.total_debt = float(dict_in["total_debt"])
@@ -54,7 +54,7 @@ class DebtPosition(object):
 
     def to_csv_row(self) -> dict:
         result = {}
-        result["time"] = self.time.strftime("%Y-%m-%d %H:%M:%S")
+        result["time"] = self.time.strftime(TIME_FMT)
         result["address"] = self.address
         result["tag"] = self.tag
         result["total_debt"] = self.total_debt
@@ -65,6 +65,7 @@ class DebtPosition(object):
 def _fetch_url(url: str) -> str:
     attempts = 0
     result = ""
+    print(f"""Fetching url: {url}""")
     while attempts <= MAX_ATTEMPTS:
         attempts += 1
         try:
