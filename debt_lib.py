@@ -215,7 +215,7 @@ def _get_alert_message(prev_debts: DebtPosition,
     if relative_change >= LARGE_CHANGE_THRESHOLD:
         return True, f'💳🤝💵 Significant INCREASE in debt. Bullish.'
     elif relative_change <= -LARGE_CHANGE_THRESHOLD:
-        return True, f'🚨🚨🚨🚨🚨 @Degen ALERT: Significant REDUCTION in debt. We gonna get rekt?'
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt. We gonna get rekt?'
 
     return False, ''
 
