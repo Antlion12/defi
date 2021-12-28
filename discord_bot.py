@@ -10,10 +10,8 @@
 # }
 #
 # Users who want to subscribe to the bot can type "!defibot" in their channel of
-# choice.
-#
-# Over time, the config.json will update automatically as subscriptions
-# accumulate.
+# choice. This subscription information will be stored in the config for future
+# runs of the bot.
 
 from absl import app
 from absl import flags
@@ -39,8 +37,67 @@ flags.DEFINE_string('config', 'config.json',
 TIME_FMT = '%Y-%m-%d %H:%M:%S'
 
 # Max amount of time to wait between broadcasting updates.
-WAIT_PERIOD_HOURS = 8
-WAIT_PERIOD_MINUTES = 0
+WAIT_PERIOD_MINUTES = 8 * 60
+
+
+class Config(object):
+    def __init__(self, config_file: str):
+        self._config_file = config_file
+
+        # Default values.
+        # Discord bot token.
+        self.token = ''
+        # Mapping from channel name (guild#channel) to channel id (an int).
+        self.channels = {}
+        # Maximum time between alerts (expressed in minutes).
+        self.max_wait_period = timedelta(minutes=WAIT_PERIOD_MINUTES)
+
+        # Load from disk.
+        self.load_config()
+
+    def load_config(self):
+        assert Path(self._config_file).is_file()
+        with open(self._config_file) as f:
+            config_json = json.loads(f.read())
+        # Ensures the "token" and "channels" fields are defined for config.
+        if 'token' in config_json:
+            self.token = config_json['token']
+        if 'channels' in config_json:
+            # One quirk of json is that int keys are stored as strings. When
+            # loading from disk we must conver the str keys back to int keys.
+            for channel_id_string, channel_name in config_json['channels'].items():
+                self.channels[int(channel_id_string)] = channel_name
+        if 'max_wait_period' in config_json:
+            self.max_wait_period = timedelta(
+                minutes=config_json['max_wait_period'])
+
+        # Discord bot's token must be defined.
+        assert self.token
+
+        print(f'Subscribed to these channels: {self.channels}')
+        print(f'Max wait period {self.max_wait_period} hours between alerts.')
+
+    def save_config(self):
+        config_dict = {
+            'token': self.token,
+            'channels': self.channels,
+            'max_wait_period': self.max_wait_period.seconds // 60
+        }
+        with open(self._config_file, 'w') as f:
+            f.write(json.dumps(config_dict, indent=4))
+
+    def subscribe_channel(self, channel_id: int, channel_name: str):
+        self.channels[channel_id] = channel_name
+        self.save_config()
+
+    def is_subscribed(self, channel_id: int) -> bool:
+        return channel_id in self.channels
+
+    def get_subscribed_channels(self) -> List[int]:
+        return self.channels.keys()
+
+    def get_channel_name(self, channel_id: int) -> str:
+        return self.channels[channel_id]
 
 
 class Tracker(object):
@@ -56,12 +113,12 @@ class Tracker(object):
 # An Alert specifies to which channel to send a message.
 class Alert(object):
     def __init__(self,
-                 channel_name: str,
+                 channel_id: int,
                  tracker: Tracker,
                  message: str,
                  urgent: bool,
                  wait_period_expired: bool):
-        self.channel_name = channel_name
+        self.channel_id = channel_id
         self.tracker = tracker
         self.message = message
         self.urgent = urgent
@@ -80,8 +137,7 @@ class AntlionDeFiBot(discord.Client):
 
         # Set of channels to send alerts to.
         assert 'config' in kwargs
-        self._config_file = kwargs['config']
-        self.load_config()
+        self._config = Config(kwargs['config'])
 
         # Start update task.
         self.update_task.start()
@@ -98,42 +154,17 @@ class AntlionDeFiBot(discord.Client):
         print('Current debt position for tracker:')
         print(self._trackers[-1].message)
 
-    def load_config(self):
-        assert Path(self._config_file).is_file()
-        with open(self._config_file) as config_file:
-            self._config = json.loads(config_file.read())
-        # Ensures the "token" and "channels" fields are defined for config.
-        assert self._config['token']
-        if 'channels' not in self._config:
-            self._config['channels'] = {}
-
-    def save_config(self):
-        with open(self._config_file, 'w') as config_file:
-            config_file.write(json.dumps(self._config, indent=4))
-
-    def subscribe_to_channel(self, channel_name: str, channel_id: int):
-        self._config['channels'][channel_name] = channel_id
-
-    def channel_is_subscribed(self, channel_name: str) -> bool:
-        return channel_name in self._config['channels']
-
-    def get_subscribed_channels(self) -> List[str]:
-        return self._config['channels'].keys()
-
-    def get_channel_id_by_name(self, name: str) -> int:
-        return self._config['channels'][name]
-
     def get_token(self) -> str:
-        return self._config['token']
+        return self._config.token
 
     def schedule_alert(self,
-                       channel_name: str,
+                       channel_id: int,
                        tracker: Tracker,
                        message: str,
                        urgent: bool,
                        wait_period_expired: bool):
         self._alerts_queue.put(
-            Alert(channel_name, tracker, message, urgent, wait_period_expired))
+            Alert(channel_id, tracker, message, urgent, wait_period_expired))
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
@@ -142,17 +173,18 @@ class AntlionDeFiBot(discord.Client):
         if message.author == self.user:
             return
 
+        # Handles subscription commands (which add this channel to the set of
+        # channels that will be notified in future alerts).
         if message.content.startswith('!defibot'):
-            channel_name = f'{message.channel.guild.name}#{message.channel.name}'
             channel_id = message.channel.id
+            channel_name = f'{message.channel.guild.name}#{message.channel.name}'
 
-            if self.channel_is_subscribed(channel_name):
+            if self._config.is_subscribed(channel_id):
                 print(f'User {message.author} requested update.')
-                await message.channel.send(f'{message.author.mention} requested an update. Coming right up....')
+                await message.channel.send(f'{message.author.mention} requested an update. Coming right up...')
             else:
                 # This is a new subscription.
-                self.subscribe_to_channel(channel_name, channel_id)
-                self.save_config()
+                self._config.subscribe_channel(channel_id, channel_name)
 
                 await message.channel.send('gm')
                 await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
@@ -160,9 +192,13 @@ class AntlionDeFiBot(discord.Client):
 
             # Schedule alert for this channel containing current messages.
             for tracker in self._trackers:
-                self.schedule_alert(channel_name, tracker,
+                self.schedule_alert(channel_id, tracker,
                                     tracker.message, False, False)
 
+    # This loop periodically updates the DebtTracker with the latest debt
+    # information for the specified user. An alert is scheduled if the update
+    # returned has_alert == True, or if the maximum wait period has elapsed
+    # between datetime.now() and tracker.last_alert_time.
     @tasks.loop(seconds=300)
     async def update_task(self):
         print('Running update task.')
@@ -174,18 +210,19 @@ class AntlionDeFiBot(discord.Client):
             print(message)
 
             wait_period_expired = ((datetime.now(timezone.utc) - tracker.last_alert_time)
-                                   >= timedelta(hours=WAIT_PERIOD_HOURS, minutes=WAIT_PERIOD_MINUTES))
+                                   >= self._config.max_wait_period)
             if has_alert or wait_period_expired:
                 # Raise alerts only if we have subscribed to channels.
-                for channel_name in self.get_subscribed_channels():
+                for channel_id in self._config.get_subscribed_channels():
                     self.schedule_alert(
-                        channel_name, tracker, message, has_alert, wait_period_expired)
+                        channel_id, tracker, message, has_alert, wait_period_expired)
 
     @update_task.before_loop
     async def before_update_task(self):
         # Wait for bot to log in.
         await self.wait_until_ready()
 
+    # This loop periodically checks the alert queue for alerts to send.
     @tasks.loop(seconds=10)
     async def alert_task(self):
         queue = self._alerts_queue
@@ -197,8 +234,7 @@ class AntlionDeFiBot(discord.Client):
 
         while not queue.empty():
             alert = queue.get()
-            channel = self.get_channel(
-                self.get_channel_id_by_name(alert.channel_name))
+            channel = self.get_channel(alert.channel_id)
             if alert.urgent:
                 alert_role = discord.utils.get(
                     channel.guild.roles, name='Degen')
@@ -206,7 +242,7 @@ class AntlionDeFiBot(discord.Client):
                     await channel.send(f'{alert_role.mention}')
             await channel.send(alert.message)
             print(
-                f'Sent alert to {alert.channel_name} with the following message:')
+                f'Sent alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
             print(alert.message)
             queue.task_done()
             # If an alert was sent, update last alert time for the tracker.
