@@ -203,7 +203,12 @@ class AntlionDeFiBot(discord.Client):
     async def update_task(self):
         print('Running update task.')
         for tracker in self._trackers:
-            has_alert, message = await tracker.debt_tracker.update()
+            try:
+                has_alert, message = await tracker.debt_tracker.update()
+            except Exception as e:
+                print(f'Exception occured while fetching URL: {e}')
+                continue
+
             tracker.message = message
             print(
                 f'Updated tracker for {tracker.debt_tracker.get_name()} with the following message:')
