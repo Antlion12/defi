@@ -201,7 +201,8 @@ class AntlionDeFiBot(discord.Client):
     # between datetime.now() and tracker.last_alert_time.
     @tasks.loop(seconds=300)
     async def update_task(self):
-        print('Running update task.')
+        print(
+            'Running update task at {datetime.now(timezone.utc).strftime(TIME_FMT)} UTC.')
         for tracker in self._trackers:
             try:
                 has_alert, message = await tracker.debt_tracker.update()
@@ -232,7 +233,8 @@ class AntlionDeFiBot(discord.Client):
     async def alert_task(self):
         queue = self._alerts_queue
 
-        print(f'Running alert task with {queue.qsize()} alerts.')
+        print(
+            f'Running alert task with {queue.qsize()} alerts at {datetime.now(timezone.utc).strftime(TIME_FMT)} UTC.')
         for tracker in self._trackers:
             print(
                 f'Last alert time for {tracker.debt_tracker.get_name()}: {tracker.last_alert_time.strftime(TIME_FMT)} UTC')
