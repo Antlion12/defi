@@ -39,8 +39,8 @@ flags.DEFINE_string('config', 'config.json',
 TIME_FMT = '%Y-%m-%d %H:%M:%S'
 
 # Max amount of time to wait between broadcasting updates.
-WAIT_PERIOD_HOURS = 0
-WAIT_PERIOD_MINUTES = 30
+WAIT_PERIOD_HOURS = 8
+WAIT_PERIOD_MINUTES = 0
 
 
 class Tracker(object):
