@@ -23,7 +23,8 @@ API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
 ZAPPER_BALANCE_FMT = 'https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}'
 MAX_ATTEMPTS = 3
 SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
-LARGE_CHANGE_THRESHOLD = 0.05
+LARGE_RELATIVE_CHANGE = 0.02
+LARGE_ABSOLUTE_CHANGE = 1000000
 TIME_STORAGE_FMT = '%Y-%m-%d %H:%M:%S%z'
 TIME_DISPLAY_FMT = '%Y-%m-%d %H:%M:%S'
 
@@ -213,10 +214,14 @@ def _get_alert_message(prev_debts: DebtPosition,
     relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
 
-    if relative_change >= LARGE_CHANGE_THRESHOLD:
-        return True, f'💳🤝💵 Significant INCREASE in debt. Bullish.'
-    elif relative_change <= -LARGE_CHANGE_THRESHOLD:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt. We gonna get rekt?'
+    if change >= LARGE_ABSOLUTE_CHANGE:
+        return True, f'💳🤝💵 Significant INCREASE in debt (at least {LARGE_ABSOLUTE_CHANGE:,} USD). Bullish.'
+    elif relative_change >= LARGE_RELATIVE_CHANGE:
+        return True, f'💳🤝💵 Significant INCREASE in debt (at least {LARGE_RELATIVE_CHANGE * 100:.2f})%. Bullish.'
+    elif change <= -LARGE_ABSOLUTE_CHANGE:
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt (at least {LARGE_ABSOLUTE_CHANGE:,} USD). We gonna get rekt?'
+    elif relative_change <= -LARGE_RELATIVE_CHANGE:
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt (at least {LARGE_RELATIVE_CHANGE * 100:.2f}%). We gonna get rekt?'
 
     return False, ''
 
