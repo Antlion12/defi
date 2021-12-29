@@ -1,5 +1,5 @@
 # This library implements a DebtTracker object to query and alert on changes in
-# debt positions for a specified wallet address.dd43d2c8f027d2d41 --tag=DeFiGod
+# debt positions for a specified wallet address.
 #
 # Requires Python version >= 3.6.
 # This library queries the Zapper API.
@@ -13,15 +13,14 @@ from datetime import timezone
 from pathlib import Path
 from typing import Optional
 from typing import Tuple
+from utils import fetch_url
 import csv
 import enum
-import httpx
 import io
 import json
 
 API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
 ZAPPER_BALANCE_FMT = 'https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}'
-MAX_ATTEMPTS = 3
 SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
 LARGE_RELATIVE_CHANGE = 0.02
 LARGE_ABSOLUTE_CHANGE = 1000000
@@ -63,22 +62,6 @@ class DebtPosition(object):
         result['total_debt'] = self.total_debt
         result['individual_debts'] = json.dumps(self.individual_debts)
         return result
-
-
-async def _fetch_url(url: str) -> str:
-    attempts = 0
-    result = ''
-    print(f'Fetching url: {url}')
-    while attempts <= MAX_ATTEMPTS:
-        attempts += 1
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
-            result = str(response.text)
-            break
-        except httpx.RemoteProtocolError as e:
-            print(f'Retrying due to exception: {e}')
-    return result
 
 
 # Constructs a key for the debts dictionary.
@@ -144,7 +127,7 @@ def _compute_total_debt(individual_debts: dict) -> float:
 # Fetches balances for the address, looks for debts, stores the debts in a
 # dictionary.
 async def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
-    response = await _fetch_url(
+    response = await fetch_url(
         ZAPPER_BALANCE_FMT.format(api_key=API_KEY,
                                   address=address)
     )
