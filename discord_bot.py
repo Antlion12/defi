@@ -24,6 +24,7 @@ from discord.ext import tasks
 from pathlib import Path
 from typing import List
 from typing import Tuple
+from utils import format_timedelta
 
 import asyncio
 import discord
@@ -243,12 +244,13 @@ class AntlionDeFiBot(discord.Client):
         while not queue.empty():
             alert = queue.get()
             channel = self.get_channel(alert.channel_id)
+            message_prefix = ''
             if alert.urgent:
                 alert_role = discord.utils.get(
                     channel.guild.roles, name='Degen')
                 if alert_role:
-                    await channel.send(f'{alert_role.mention}')
-            await channel.send(alert.message)
+                    message_prefix = (f'{alert_role.mention} ')
+            await channel.send(message_prefix + alert.message)
             print(
                 f'Sent alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
             print(alert.message)
