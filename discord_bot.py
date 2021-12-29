@@ -75,7 +75,8 @@ class Config(object):
         assert self.token
 
         print(f'Subscribed to these channels: {self.channels}')
-        print(f'Max wait period {self.max_wait_period} hours between alerts.')
+        print(
+            f'Max wait period {format_timedelta(self.max_wait_period)} between alerts.')
 
     def save_config(self):
         config_dict = {

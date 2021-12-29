@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 from typing import Tuple
 from utils import fetch_url
+from utils import format_timedelta
 import csv
 import enum
 import io
@@ -224,7 +225,7 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
     print(
         f'Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)', end='', file=output)
     print(
-        f' compared to {prev_debts.time.strftime(TIME_DISPLAY_FMT)} UTC ({time_diff} hours ago).', file=output)
+        f' compared to {prev_debts.time.strftime(TIME_DISPLAY_FMT)} UTC ({format_timedelta(time_diff)} ago).', file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
