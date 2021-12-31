@@ -39,7 +39,8 @@ TIME_FMT = '%Y-%m-%d %H:%M:%S'
 
 # Max amount of time to wait between broadcasting updates.
 WAIT_PERIOD_MINUTES = 8 * 60
-
+USAGE = '''You may check current debt positions by typing in the command: `!defibot`
+You may also wait for automatic updates.'''
 
 class Config(object):
     def __init__(self, config_file: str):
@@ -147,7 +148,7 @@ class AntlionDeFiBot(discord.Client):
 
     def add_tracker(self, debt_tracker: DebtTracker):
         # Initialize last alert time to be min time UTC.
-        last_alert_time = datetime(MINYEAR, 1, 1, tzinfo=timezone.utc)
+        last_alert_time = datetime.now(timezone.utc)
         # Get last recorded message from DebtTracker.
         _, message = debt_tracker.get_current()
 
@@ -170,6 +171,11 @@ class AntlionDeFiBot(discord.Client):
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
+        # Schedule alert for this channel containing current messages.
+        for channel_id in self._config.get_subscribed_channels():
+            channel = self.get_channel(channel_id)
+            await channel.send('hello sers. I have returned.')
+            await channel.send(USAGE)
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -190,6 +196,9 @@ class AntlionDeFiBot(discord.Client):
 
                 await message.channel.send('gm')
                 await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
+                await message.channel.send(USAGE)
+                await message.channel.send('For now, I will share with you the current debts I am tracking.')
+
                 print(f'Subscribed to {channel_name} ({channel_id})')
 
             # Schedule alert for this channel containing current messages.
