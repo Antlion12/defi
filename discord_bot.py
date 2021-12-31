@@ -42,6 +42,7 @@ WAIT_PERIOD_MINUTES = 8 * 60
 USAGE = '''You may check current debt positions by typing in the command: `!defibot`
 You may also wait for automatic updates.'''
 
+
 class Config(object):
     def __init__(self, config_file: str):
         self._config_file = config_file
