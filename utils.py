@@ -18,10 +18,10 @@ async def fetch_url(url: str) -> str:
                 response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
             assert response.status_code == 200
             result = str(response.text)
-            break
+            return result
         except httpx.RemoteProtocolError as e:
             print(f'Retrying due to exception: {e}')
-    return result
+    raise Exception('URL fetch failed')
 
 
 # Formats timedelta into something more readable.
