@@ -16,6 +16,7 @@ async def fetch_url(url: str) -> str:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
+            assert response.status_code == 200
             result = str(response.text)
             break
         except httpx.RemoteProtocolError as e:
