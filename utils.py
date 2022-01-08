@@ -1,10 +1,15 @@
 # This library provides utility functions for this project.
 
+from datetime import datetime
+from datetime import MINYEAR
 from datetime import timedelta
+from datetime import timezone
 import httpx
 
 MAX_ATTEMPTS = 3
-
+TIME_STORAGE_FMT = '%Y-%m-%d %H:%M:%S%z'
+TIME_DISPLAY_FMT = '%Y-%m-%d %H:%M:%S'
+MIN_TIME = datetime(year=MINYEAR, month=1, day=1, tzinfo=timezone.utc)
 
 # Makes a GET request to a URL and stores the result as a text string.
 async def fetch_url(url: str) -> str:
@@ -41,3 +46,18 @@ def format_timedelta(delta: timedelta) -> str:
     tokens.append(f'{seconds} seconds')
 
     return ', '.join(tokens)
+
+
+# Formats datetime into a display format.
+def display_time(time: datetime) -> str:
+    return time.strftime(TIME_DISPLAY_FMT)
+
+
+# Formats the datetime into a storage representation string.
+def format_storage_time(time: datetime) -> str:
+    return time.strftime(TIME_STORAGE_FMT)
+
+
+# Parses a datetime from a storage representation string.
+def parse_storage_time(time_string: str) -> datetime:
+    return datetime.strptime(time_string, TIME_STORAGE_FMT)
