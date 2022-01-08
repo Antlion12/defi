@@ -16,7 +16,6 @@
 from absl import app
 from absl import flags
 from datetime import datetime
-from datetime import MINYEAR
 from datetime import timedelta
 from datetime import timezone
 from debt_lib import DebtTracker
@@ -24,22 +23,22 @@ from discord.ext import tasks
 from pathlib import Path
 from typing import List
 from typing import Tuple
-from utils import format_timedelta
 
 import asyncio
 import discord
 import json
 import queue
+import shutil
+import traceback
+import utils
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('config', 'config.json',
                     'JSON file containing bot config.')
 
-TIME_FMT = '%Y-%m-%d %H:%M:%S'
-
 # Max amount of time to wait between broadcasting updates.
 WAIT_PERIOD_MINUTES = 8 * 60
-USAGE = '''You may check current debt positions by typing in the command: `!defibot`
+USAGE = '''You may check current debt positions by typing in the command: `!{command}`
 You may also wait for automatic updates.'''
 
 
@@ -54,6 +53,8 @@ class Config(object):
         self.channels = {}
         # Maximum time between alerts (expressed in minutes).
         self.max_wait_period = timedelta(minutes=WAIT_PERIOD_MINUTES)
+        # List of trackers.
+        self.trackers = []
 
         # Load from disk.
         self.load_config()
@@ -62,31 +63,71 @@ class Config(object):
         assert Path(self._config_file).is_file()
         with open(self._config_file) as f:
             config_json = json.loads(f.read())
-        # Ensures the "token" and "channels" fields are defined for config.
-        if 'token' in config_json:
-            self.token = config_json['token']
+
+        # Configures bot to respond to '!<subscribe_command>' command.
+        # Otherwise, defaults to '!defibot'.
+        self.subscribe_command = config_json.get(
+            'subscribe_command', 'defibot')
+
+        # Fetches the bot's token.
+        self.token = config_json.get('token')
+
+        # Loads channels that the bot is subscribed to.
         if 'channels' in config_json:
             # One quirk of json is that int keys are stored as strings. When
             # loading from disk we must conver the str keys back to int keys.
             for channel_id_string, channel_name in config_json['channels'].items():
                 self.channels[int(channel_id_string)] = channel_name
+
+        # Loads the maximum waiting period between updates.
         if 'max_wait_period' in config_json:
             self.max_wait_period = timedelta(
                 minutes=config_json['max_wait_period'])
+
+        # Loads the trackers.
+        if 'trackers' in config_json:
+            for tracker_json in config_json['trackers']:
+                self.trackers.append(self.parse_tracker(tracker_json))
 
         # Discord bot's token must be defined.
         assert self.token
 
         print(f'Subscribed to these channels: {self.channels}')
         print(
-            f'Max wait period {format_timedelta(self.max_wait_period)} between alerts.')
+            f'Max wait period {utils.format_timedelta(self.max_wait_period)} between alerts.')
+        for tracker in self.trackers:
+            print(
+                f'Tracking {tracker.get_name()}. Last update: {tracker.get_last_update_time()}. Last alert: {tracker.get_last_alert_time()}.')
+
+    def parse_tracker(self, tracker_json: dict) -> DebtTracker:
+        address = tracker_json['address']
+        tag = tracker_json.get('tag')
+        last_alert_time = tracker_json.get('last_alert_time')
+        return DebtTracker(address, tag, last_alert_time)
 
     def save_config(self):
         config_dict = {
+            'subscribe_command': self.subscribe_command,
             'token': self.token,
             'channels': self.channels,
-            'max_wait_period': self.max_wait_period.seconds // 60
+            'max_wait_period': self.max_wait_period.seconds // 60,
+            'trackers': []
         }
+        for t in self.trackers:
+            tracker_json = {}
+            tracker_json['address'] = t.get_address()
+            tag = t.get_tag()
+            if tag:
+                tracker_json['tag'] = tag
+            last_alert_time = t.get_last_alert_time()
+            if last_alert_time:
+                tracker_json['last_alert_time'] = utils.format_storage_time(
+                    last_alert_time)
+            config_dict['trackers'].append(tracker_json)
+
+        # Create a backup first.
+        shutil.copyfile(self._config_file, self._config_file + '.backup')
+        # Store new config file.
         with open(self._config_file, 'w') as f:
             f.write(json.dumps(config_dict, indent=4))
 
@@ -104,26 +145,14 @@ class Config(object):
         return self.channels[channel_id]
 
 
-class Tracker(object):
-    def __init__(self,
-                 debt_tracker: DebtTracker,
-                 last_alert_time: datetime,
-                 message: str):
-        self.debt_tracker = debt_tracker
-        self.last_alert_time = last_alert_time
-        self.message = message
-
-
 # An Alert specifies to which channel to send a message.
 class Alert(object):
     def __init__(self,
                  channel_id: int,
-                 tracker: Tracker,
                  message: str,
                  urgent: bool,
                  wait_period_expired: bool):
         self.channel_id = channel_id
-        self.tracker = tracker
         self.message = message
         self.urgent = urgent
         self.wait_period_expired = wait_period_expired
@@ -133,13 +162,10 @@ class AntlionDeFiBot(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Set of trackers to update on each loop of the background task.
-        self._trackers = []
-
         # Initialize alerts queue.
         self._alerts_queue = queue.Queue()
 
-        # Set of channels to send alerts to.
+        # Configuration state for the bot.
         assert 'config' in kwargs
         self._config = Config(kwargs['config'])
 
@@ -147,28 +173,16 @@ class AntlionDeFiBot(discord.Client):
         self.update_task.start()
         self.alert_task.start()
 
-    def add_tracker(self, debt_tracker: DebtTracker):
-        # Initialize last alert time to be min time UTC.
-        last_alert_time = datetime.now(timezone.utc)
-        # Get last recorded message from DebtTracker.
-        _, message = debt_tracker.get_current()
-
-        self._trackers.append(Tracker(debt_tracker, last_alert_time, message))
-
-        print('Current debt position for tracker:')
-        print(self._trackers[-1].message)
-
     def get_token(self) -> str:
         return self._config.token
 
     def schedule_alert(self,
                        channel_id: int,
-                       tracker: Tracker,
                        message: str,
                        urgent: bool,
                        wait_period_expired: bool):
         self._alerts_queue.put(
-            Alert(channel_id, tracker, message, urgent, wait_period_expired))
+            Alert(channel_id, message, urgent, wait_period_expired))
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
@@ -176,7 +190,7 @@ class AntlionDeFiBot(discord.Client):
         for channel_id in self._config.get_subscribed_channels():
             channel = self.get_channel(channel_id)
             await channel.send('hello sers. I have returned.')
-            await channel.send(USAGE)
+            await channel.send(USAGE.format(command=self._config.subscribe_command))
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -184,7 +198,7 @@ class AntlionDeFiBot(discord.Client):
 
         # Handles subscription commands (which add this channel to the set of
         # channels that will be notified in future alerts).
-        if message.content.startswith('!defibot'):
+        if message.content.startswith(f'!{self._config.subscribe_command}'):
             channel_id = message.channel.id
             channel_name = f'{message.channel.guild.name}#{message.channel.name}'
 
@@ -197,43 +211,52 @@ class AntlionDeFiBot(discord.Client):
 
                 await message.channel.send('gm')
                 await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
-                await message.channel.send(USAGE)
+                await message.channel.send(USAGE.format(command=self._config.subscribe_command))
                 await message.channel.send('For now, I will share with you the current debts I am tracking.')
 
                 print(f'Subscribed to {channel_name} ({channel_id})')
 
             # Schedule alert for this channel containing current messages.
-            for tracker in self._trackers:
-                self.schedule_alert(channel_id, tracker,
-                                    tracker.message, False, False)
+            for tracker in self._config.trackers:
+                self.schedule_alert(channel_id, tracker.get_last_message(),
+                                    urgent=False,
+                                    wait_period_expired=False)
 
     # This loop periodically updates the DebtTracker with the latest debt
     # information for the specified user. An alert is scheduled if the update
     # returned has_alert == True, or if the maximum wait period has elapsed
-    # between datetime.now() and tracker.last_alert_time.
+    # between datetime.now() and the tracker's last alert time.
     @tasks.loop(seconds=300)
     async def update_task(self):
         print(
-            'Running update task at {datetime.now(timezone.utc).strftime(TIME_FMT)} UTC.')
-        for tracker in self._trackers:
+            'Running update task at {utils.display_time(datetime.now(timezone.utc))} UTC.')
+        for tracker in self._config.trackers:
             try:
-                has_alert, message = await tracker.debt_tracker.update()
+                has_alert, message = await tracker.update()
             except Exception as e:
                 print(f'Exception occured while fetching URL: {e}')
+                traceback.print_exec()
                 continue
 
-            tracker.message = message
             print(
-                f'Updated tracker for {tracker.debt_tracker.get_name()} with the following message:')
+                f'Updated tracker for {tracker.get_name()} with the following message:')
             print(message)
 
-            wait_period_expired = ((datetime.now(timezone.utc) - tracker.last_alert_time)
-                                   >= self._config.max_wait_period)
+            wait_period_expired = (
+                (datetime.now(timezone.utc) - tracker.get_last_alert_time())
+                >= self._config.max_wait_period
+            )
             if has_alert or wait_period_expired:
+                # Manually sync the alert time to allow for the
+                # 'wait_period_expired' criterion to trigger an alert.
+                tracker.sync_last_alert_time()
                 # Raise alerts only if we have subscribed to channels.
                 for channel_id in self._config.get_subscribed_channels():
-                    self.schedule_alert(
-                        channel_id, tracker, message, has_alert, wait_period_expired)
+                    self.schedule_alert(channel_id, message,
+                                        has_alert, wait_period_expired)
+
+            # Saves config state after updating this tracker.
+            self._config.save_config()
 
     @update_task.before_loop
     async def before_update_task(self):
@@ -246,10 +269,10 @@ class AntlionDeFiBot(discord.Client):
         queue = self._alerts_queue
 
         print(
-            f'Running alert task with {queue.qsize()} alerts at {datetime.now(timezone.utc).strftime(TIME_FMT)} UTC.')
-        for tracker in self._trackers:
+            f'Running alert task with {queue.qsize()} alerts at {utils.display_time(datetime.now(timezone.utc))} UTC.')
+        for tracker in self._config.trackers:
             print(
-                f'Last alert time for {tracker.debt_tracker.get_name()}: {tracker.last_alert_time.strftime(TIME_FMT)} UTC')
+                f'Last alert time for {tracker.get_name()}: {utils.display_time(tracker.get_last_alert_time())} UTC')
 
         while not queue.empty():
             alert = queue.get()
@@ -265,9 +288,6 @@ class AntlionDeFiBot(discord.Client):
                 f'Sent alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
             print(alert.message)
             queue.task_done()
-            # If an alert was sent, update last alert time for the tracker.
-            if alert.urgent or alert.wait_period_expired:
-                alert.tracker.last_alert_time = datetime.now(timezone.utc)
 
     @alert_task.before_loop
     async def before_alert_task(self):
@@ -276,10 +296,6 @@ class AntlionDeFiBot(discord.Client):
 
 def main(argv):
     client = AntlionDeFiBot(config=FLAGS.config)
-    client.add_tracker(DebtTracker(
-        address='0x3f3e305c4ad49271ebda489dd43d2c8f027d2d41', tag='DeFiGod'))
-    client.add_tracker(DebtTracker(
-        address='0x9c5083dd4838e120dbeac44c052179692aa5dac5', tag='TetraNode'))
     client.run(client.get_token())
 
 

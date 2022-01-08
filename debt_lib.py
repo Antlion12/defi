@@ -14,19 +14,17 @@ from pathlib import Path
 from typing import Optional
 from typing import Tuple
 from utils import fetch_url
-from utils import format_timedelta
 import csv
 import enum
 import io
 import json
+import utils
 
 API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
 ZAPPER_BALANCE_FMT = 'https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}'
 SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
 LARGE_RELATIVE_CHANGE = 0.02
 LARGE_ABSOLUTE_CHANGE = 1000000
-TIME_STORAGE_FMT = '%Y-%m-%d %H:%M:%S%z'
-TIME_DISPLAY_FMT = '%Y-%m-%d %H:%M:%S'
 
 
 class DebtPosition(object):
@@ -49,7 +47,7 @@ class DebtPosition(object):
                 logging.fatal('Ineligible key: ' + key)
 
     def from_csv_row(self, dict_in: dict):
-        self.time = datetime.strptime(dict_in['time'], TIME_STORAGE_FMT)
+        self.time = utils.parse_storage_time(dict_in['time'])
         self.address = dict_in['address']
         self.tag = dict_in['tag']
         self.total_debt = float(dict_in['total_debt'])
@@ -57,7 +55,7 @@ class DebtPosition(object):
 
     def to_csv_row(self) -> dict:
         result = {}
-        result['time'] = self.time.strftime(TIME_STORAGE_FMT)
+        result['time'] = utils.format_storage_time(self.time)
         result['address'] = self.address
         result['tag'] = self.tag
         result['total_debt'] = self.total_debt
@@ -225,7 +223,7 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
     print(
         f'Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)', end='', file=output)
     print(
-        f' compared to {prev_debts.time.strftime(TIME_DISPLAY_FMT)} UTC ({format_timedelta(time_diff)} ago).', file=output)
+        f' compared to {utils.display_time(prev_debts.time)} UTC ({utils.format_timedelta(time_diff)} ago).', file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
@@ -235,10 +233,29 @@ def _write_debts(debts: DebtPosition, savefile: str):
 
 
 class DebtTracker(object):
-    def __init__(self, address: str, tag: Optional[str]):
+    def __init__(self,
+                 address: str,
+                 tag: Optional[str],
+                 last_alert_time: Optional[str]):
+        # Address of the wallet being tracked.
         self._address = address
+        # A human-readable tag to associate with the address.
         self._tag = tag
+        # Path for saving the data for this tracker.
         self._savefile = _get_savefile(address, tag)
+        # A datetime representing the last time the state of the tracker was
+        # updated. This is set after running the get_last_update() call.
+        self._last_update_time = utils.MIN_TIME
+        # The last time the tracker raised an alert. This is set internally by
+        # the sync_last_alert_time() call, as well as externally during
+        # construction.
+        if last_alert_time:
+            self._last_alert_time = utils.parse_storage_time(last_alert_time)
+        else:
+            self._last_alert_time = utils.MIN_TIME
+        # The contents of the latest message that was produced from running
+        # update() or _get_last_update().
+        self._last_message = f'Track for {self.get_name()} just initialized.'
 
         # Creates a new savefile if needed.
         if not Path(self._savefile).is_file():
@@ -246,13 +263,39 @@ class DebtTracker(object):
                 writer = csv.DictWriter(csvfile, SAVEFILE_FIELDS)
                 writer.writeheader()
 
+        # Load the latest saved debt data.
+        self._get_last_update()
+
     def get_name(self) -> str:
         name = self._address
         if self._tag:
             name += f' ({self._tag})'
         return name
 
-    def get_current(self) -> Tuple[bool, str]:
+    def get_address(self) -> str:
+        return self._address
+
+    def get_tag(self) -> Optional[str]:
+        return self._tag
+
+    def get_last_update_time(self) -> datetime:
+        return self._last_update_time
+
+    def get_last_alert_time(self) -> datetime:
+        return self._last_alert_time
+
+    def get_last_message(self) -> str:
+        return self._last_message
+
+    # Sets the last alert time to the last update time. This is useful when
+    # there is some caller that is using a different criteria for triggering an
+    # alert.
+    def sync_last_alert_time(self):
+        self._last_alert_time = self._last_update_time
+
+    # An internal function that fetches the current state of the tracker without
+    # performing new queries.
+    def _get_last_update(self) -> Tuple[bool, str]:
         address = self._address
         tag = self._tag
         savefile = self._savefile
@@ -264,11 +307,17 @@ class DebtTracker(object):
 
         output = io.StringIO()
         print(
-            f'Debt Positions for {self.get_name()} at {debts.time.strftime(TIME_DISPLAY_FMT)} UTC', file=output)
+            f'Debt Positions for {self.get_name()} at {utils.display_time(debts.time)} UTC', file=output)
         print('```', file=output)
         _print_debts(debts, output)
         print('```=================', file=output)
         message = output.getvalue()
+
+        # Update timestamps and messages.
+        self._last_update_time = debts.time
+        self._last_message = message
+        if self._last_alert_time == utils.MIN_TIME:
+            self.sync_last_alert_time()
 
         return False, message
 
@@ -283,15 +332,22 @@ class DebtTracker(object):
 
         output = io.StringIO()
         print(
-            f'Debt Positions for {self.get_name()} at {debts.time.strftime(TIME_DISPLAY_FMT)} UTC', file=output)
+            f'Debt Positions for {self.get_name()} at {utils.display_time(debts.time)} UTC', file=output)
         if has_alert:
             print(alert_message, file=output)
+
         print('```', file=output)
         _print_debts(debts, output)
         print('', file=output)
         _print_debt_comparison(prev_debts, debts, output)
         print('```=================', file=output)
         message = output.getvalue()
+
+        # Update timestamps and messages.
+        self._last_update_time = debts.time
+        self._last_message = message
+        if has_alert:
+            self.sync_last_alert_time()
 
         _write_debts(debts, savefile)
 
