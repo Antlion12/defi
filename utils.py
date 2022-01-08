@@ -12,6 +12,8 @@ TIME_DISPLAY_FMT = '%Y-%m-%d %H:%M:%S'
 MIN_TIME = datetime(year=MINYEAR, month=1, day=1, tzinfo=timezone.utc)
 
 # Makes a GET request to a URL and stores the result as a text string.
+
+
 async def fetch_url(url: str) -> str:
     attempts = 0
     result = ''
