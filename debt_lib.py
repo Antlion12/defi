@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 from typing import Tuple
 from utils import fetch_url
+import asyncio
 import csv
 import enum
 import io
@@ -22,6 +23,8 @@ import utils
 
 API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
 ZAPPER_BALANCE_FMT = 'https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}'
+ZAPPER_SUPPORTED_PROTOS_FMT = 'https://api.zapper.fi/v1/protocols/balances/supported?api_key={api_key}&addresses[]={address}'
+ZAPPER_APP_BALANCE_FMT = 'https://api.zapper.fi/v1/protocols/{app}/balances?network={network}&api_key={api_key}&addresses[]={address}'
 SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
 LARGE_RELATIVE_CHANGE = 0.02
 LARGE_ABSOLUTE_CHANGE = 1000000
@@ -64,7 +67,7 @@ class DebtPosition(object):
 
 
 # Constructs a key for the debts dictionary.
-def _make_key(asset: dict, token: Optional[str]) -> str:
+def _make_key(asset: dict, token: Optional[dict]) -> str:
     assert asset
 
     # Collect fields for constructing key.
@@ -81,12 +84,6 @@ def _make_key(asset: dict, token: Optional[str]) -> str:
 
     key = ' / '.join(terms)
 
-    if token:
-        if 'label' in token:
-            key += f" ({token['label']})"
-        elif 'symbol' in token:
-            key += f" ({token['symbol']})"
-
     return key
 
 # Parses app_balance json for debts.
@@ -98,7 +95,7 @@ def _make_key(asset: dict, token: Optional[str]) -> str:
 
 
 def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
-    for product in app_balance['balances'][address]['products']:
+    for product in app_balance[address]['products']:
         for asset in product['assets']:
             logging.debug(f'Found asset: {json.dumps(asset, indent=4)}')
 
@@ -107,8 +104,12 @@ def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
                     logging.debug(
                         f'Found debt: {json.dumps(asset, indent=4)}')
                     # Found a debt position among asset tokens.
-                    key = _make_key(asset)
-                    debts[key] = asset['balance']
+                    key = _make_key(asset, token=None)
+                    debts[key] = {
+                        'usd': -asset['balanceUSD'],
+                        'tokens': asset['balance'],
+                        'symbol': asset['symbol']
+                    }
             else:
                 for token in asset['tokens']:
                     if token['balanceUSD'] < 0:
@@ -116,11 +117,15 @@ def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
                             f'Found debt: {json.dumps(token, indent=4)}')
                         # Found a debt position among asset tokens.
                         key = _make_key(asset, token)
-                        debts[key] = token['balance']
+                        debts[key] = {
+                            'usd': -token['balanceUSD'],
+                            'tokens': token['balance'],
+                            'symbol': token['symbol']
+                        }
 
 
 def _compute_total_debt(individual_debts: dict) -> float:
-    return sum(debt for _, debt in individual_debts.items())
+    return sum(debt['usd'] for _, debt in individual_debts.items())
 
 
 # Fetches balances for the address, looks for debts, stores the debts in a
@@ -140,7 +145,52 @@ async def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
         if content == 'start' or content == 'end':
             continue
 
-        app_balance = json.loads(content)
+        app_balance = json.loads(content)['balances']
+        _parse_app_balance(app_balance, address, debts)
+
+    return DebtPosition(time=datetime.now(timezone.utc),
+                        address=address,
+                        tag=tag,
+                        total_debt=_compute_total_debt(debts),
+                        individual_debts=debts)
+
+
+class App(object):
+    def __init__(self, network_in, app_in):
+        self.network = network_in
+        self.app = app_in
+
+
+async def _query_new_debts2(address: str, tag: Optional[str]) -> DebtPosition:
+    # Get app IDs.
+    protocols_response = await fetch_url(
+        ZAPPER_SUPPORTED_PROTOS_FMT.format(api_key=API_KEY, address=address)
+    )
+    protocols = json.loads(protocols_response)
+
+    app_ids = []
+    for protocol in protocols:
+        for app in protocol['apps']:
+            if app['appId'] != 'tokens':
+                app_ids.append(App(protocol['network'], app['appId']))
+
+    # Fetch balances per app.
+    app_balance_responses = []
+    fetch_routines = []
+    for app_id in app_ids:
+        logging.debug(f'Querying {app_id.network}/{app_id.app}')
+        fetch_routines.append(fetch_url(
+            ZAPPER_APP_BALANCE_FMT.format(api_key=API_KEY,
+                                          address=address,
+                                          network=app_id.network,
+                                          app=app_id.app)
+        ))
+    app_balance_responses = await asyncio.gather(*fetch_routines)
+
+    # Parse the debt balances from each app.
+    debts = {}
+    for app_balance_response in app_balance_responses:
+        app_balance = json.loads(app_balance_response)
         _parse_app_balance(app_balance, address, debts)
 
     return DebtPosition(time=datetime.now(timezone.utc),
@@ -151,8 +201,9 @@ async def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
 
 
 def _print_debts(debts: DebtPosition, output):
-    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]):
-        print(f'{value:17,.2f} -- {name}', file=output)
+    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['usd']):
+        print(
+            f'''{value['usd']:17,.2f} USD ({value['tokens']:17,.2f} {value['symbol']:<5s}) -- {name}''', file=output)
 
     print('-----------------', file=output)
     print(f'{debts.total_debt:17,.2f} USD -- Total Debt', file=output)
@@ -326,7 +377,7 @@ class DebtTracker(object):
         tag = self._tag
         savefile = self._savefile
 
-        debts = await _query_new_debts(address, tag)
+        debts = await _query_new_debts2(address, tag)
         prev_debts = _query_prev_debts(savefile)
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 
