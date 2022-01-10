@@ -125,7 +125,7 @@ def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
 
 
 def _compute_total_debt(individual_debts: dict) -> float:
-    return sum(debt['usd'] for _, debt in individual_debts.items())
+    return sum(debt['tokens'] for _, debt in individual_debts.items())
 
 
 # Fetches balances for the address, looks for debts, stores the debts in a
@@ -201,9 +201,9 @@ async def _query_new_debts2(address: str, tag: Optional[str]) -> DebtPosition:
 
 
 def _print_debts(debts: DebtPosition, output):
-    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['usd']):
+    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
         print(
-            f'''{value['usd']:17,.2f} USD ({value['tokens']:17,.2f} {value['symbol']:<5s}) -- {name}''', file=output)
+            f'''{value['tokens']:17,.2f} {value['symbol']:<5s} -- {name}''', file=output)
 
     print('-----------------', file=output)
     print(f'{debts.total_debt:17,.2f} USD -- Total Debt', file=output)
