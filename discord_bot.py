@@ -235,7 +235,7 @@ class AntlionDeFiBot(discord.Client):
                 has_alert, message = await tracker.update()
             except Exception as e:
                 print(f'Exception occured while fetching URL: {e}')
-                traceback.print_exec()
+                traceback.print_exc()
                 continue
 
             print(
