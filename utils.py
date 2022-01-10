@@ -12,8 +12,6 @@ TIME_DISPLAY_FMT = '%Y-%m-%d %H:%M:%S'
 MIN_TIME = datetime(year=MINYEAR, month=1, day=1, tzinfo=timezone.utc)
 
 # Makes a GET request to a URL and stores the result as a text string.
-
-
 async def fetch_url(url: str) -> str:
     attempts = 0
     result = ''
@@ -23,12 +21,16 @@ async def fetch_url(url: str) -> str:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, headers={'accept': '*/*'}, timeout=60)
-            assert response.status_code == 200
+            if response.status_code != 200:
+                raise Exception('URL fetch attempt did not return 200')
             result = str(response.text)
             return result
-        except httpx.RemoteProtocolError as e:
-            print(f'Retrying due to exception: {e}')
-    raise Exception('URL fetch failed')
+        except Exception as e:
+            if attempts >= MAX_ATTEMPTS:
+                raise e
+            else:
+                print(f'Retrying due to exception: {e}')
+    raise Exception('Should not reach this part.')
 
 
 # Formats timedelta into something more readable.
