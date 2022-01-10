@@ -249,13 +249,13 @@ def _get_alert_message(prev_debts: DebtPosition,
     time_diff = debts.time - prev_debts.time
 
     if change >= LARGE_ABSOLUTE_CHANGE:
-        return True, f'💳🤝💵 Significant INCREASE in debt (at least {LARGE_ABSOLUTE_CHANGE:,} USD). Bullish.'
+        return True, f'💳🤝💵 Significant INCREASE in debt ({change:,} USD). Bullish.'
     elif relative_change >= LARGE_RELATIVE_CHANGE:
-        return True, f'💳🤝💵 Significant INCREASE in debt (at least {LARGE_RELATIVE_CHANGE * 100:.2f})%. Bullish.'
+        return True, f'💳🤝💵 Significant INCREASE in debt ({relative_change * 100:.2f})%. Bullish.'
     elif change <= -LARGE_ABSOLUTE_CHANGE:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt (at least {LARGE_ABSOLUTE_CHANGE:,} USD). We gonna get rekt?'
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({change:,} USD). We gonna get rekt?'
     elif relative_change <= -LARGE_RELATIVE_CHANGE:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt (at least {LARGE_RELATIVE_CHANGE * 100:.2f}%). We gonna get rekt?'
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({relative_change * 100:.2f}%). We gonna get rekt?'
 
     return False, ''
 
@@ -382,10 +382,10 @@ class DebtTracker(object):
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 
         output = io.StringIO()
-        print(
-            f'Debt Positions for {self.get_name()} at {utils.display_time(debts.time)} UTC', file=output)
         if has_alert:
             print(alert_message, file=output)
+        print(
+            f'Debt Positions for {self.get_name()} at {utils.display_time(debts.time)} UTC', file=output)
 
         print('```', file=output)
         _print_debts(debts, output)
