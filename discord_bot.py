@@ -278,11 +278,6 @@ class AntlionDeFiBot(discord.Client):
             alert = queue.get()
             channel = self.get_channel(alert.channel_id)
             message_prefix = ''
-            if alert.urgent:
-                alert_role = discord.utils.get(
-                    channel.guild.roles, name='Degen')
-                if alert_role:
-                    message_prefix = (f'{alert_role.mention} ')
             await channel.send(message_prefix + alert.message)
             print(
                 f'Sent alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
