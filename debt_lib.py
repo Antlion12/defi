@@ -203,7 +203,7 @@ async def _query_new_debts2(address: str, tag: Optional[str]) -> DebtPosition:
 def _print_debts(debts: DebtPosition, output):
     for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
         print(
-            f'''{value['tokens']:17,.2f} {value['symbol']:<5s} -- {name}''', file=output)
+            f'''{value['tokens']:17,.2f} {value['symbol']:<6s} -- {name}''', file=output)
 
     print('-----------------', file=output)
     print(f'{debts.total_debt:17,.2f} USD -- Total Debt', file=output)
@@ -275,6 +275,32 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
         f'Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)', end='', file=output)
     print(
         f' compared to {utils.display_time(prev_debts.time)} UTC ({utils.format_timedelta(time_diff)} ago).', file=output)
+
+    # Loop through debts in the current debts position.
+    individual_changes = []
+    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
+        if name in prev_debts.individual_debts:
+            prev_tokens = prev_debts.individual_debts[name]['tokens']
+        else:
+            prev_tokens = 0
+        individual_change = value['tokens'] - prev_tokens
+        individual_changes.append([individual_change, value['symbol'], name])
+
+    # Check debts in prev_debts that don't exist in debts.
+    for name, value in sorted(prev_debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
+        if name in debts.individual_debts:
+            continue
+        individual_change = -value['tokens']
+        individual_changes.append([individual_change, value['symbol'], name])
+
+    printed_notable_change = False
+    for individual_change, symbol, name in sorted(individual_changes, key=lambda x: -abs(x[0])):
+        if abs(individual_change) >= LARGE_ABSOLUTE_CHANGE * 0.05:
+            if not printed_notable_change:
+                print('\nNotable changes:', file=output)
+                printed_notable_change = True
+            print(
+                f'''{individual_change:+17,.2f} {symbol:<6s} -- {name}''', file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
