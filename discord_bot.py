@@ -40,6 +40,7 @@ flags.DEFINE_string('config', 'config.json',
 WAIT_PERIOD_MINUTES = 8 * 60
 USAGE = '''You may check current debt positions by typing in the command: `!{command}`
 You may also wait for automatic updates.'''
+MAX_MESSAGE_LENGTH = 2000
 
 
 class Config(object):
@@ -263,6 +264,36 @@ class AntlionDeFiBot(discord.Client):
         # Wait for bot to log in.
         await self.wait_until_ready()
 
+    async def send_long_message(self, channel, message):
+        if len(message) <= MAX_MESSAGE_LENGTH:
+            await channel.send(message)
+            return
+
+        buffer = ''
+        buffer_length = 0
+        in_code_block = False
+        for line in message.splitlines():
+            if '```' in line:
+                in_code_block = not in_code_block
+            buffer += line + '\n'
+            buffer_length += len(line) + 1
+            if buffer_length > MAX_MESSAGE_LENGTH - 500:
+                # Print existing buffer and reset the buffer variables. Add
+                # trailing ``` for the existing buffer and prepending a leading
+                # ``` for the next buffer if in_code_block == True.
+                if in_code_block:
+                    buffer += '```\n'
+                await channel.send(buffer)
+                if (in_code_block):
+                    buffer = '```\n'
+                else:
+                    buffer = ''
+                buffer_length = len(buffer)
+        # Print remaining contents from buffer.
+        if in_code_block:
+            buffer += '```\n'
+        await channel.send(buffer)
+
     # This loop periodically checks the alert queue for alerts to send.
     @tasks.loop(seconds=10)
     async def alert_task(self):
@@ -277,8 +308,7 @@ class AntlionDeFiBot(discord.Client):
         while not queue.empty():
             alert = queue.get()
             channel = self.get_channel(alert.channel_id)
-            message_prefix = ''
-            await channel.send(message_prefix + alert.message)
+            await self.send_long_message(channel, alert.message)
             print(
                 f'Sent alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
             print(alert.message)
