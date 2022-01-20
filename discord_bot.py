@@ -104,7 +104,8 @@ class Config(object):
         address = tracker_json['address']
         tag = tracker_json.get('tag')
         last_alert_time = tracker_json.get('last_alert_time')
-        return DebtTracker(address, tag, last_alert_time)
+        return DebtTracker(address, tag, self.subscribe_command,
+                           last_alert_time)
 
     def save_config(self):
         config_dict = {

@@ -211,6 +211,11 @@ def _print_debts(debts: DebtPosition, output: io.StringIO):
     return
 
 
+def _print_short_debts(debts: DebtPosition, output: io.StringIO):
+    print(f'Total Debt: {debts.total_debt:,.2f} USD\n', file=output)
+    return
+
+
 def _get_savefile(address: str, tag: Optional[str]) -> str:
     filename = '-'.join([address, tag]) if tag else address
     return f'{filename}.csv'
@@ -318,12 +323,15 @@ def _print_title(wallet_name: str, timestamp: datetime, output: io.StringIO):
 class DebtTracker(object):
     def __init__(self,
                  address: str,
+                 subscribe_command: str,
                  tag: Optional[str],
                  last_alert_time: Optional[str]):
         # Address of the wallet being tracked.
         self._address = address
         # A human-readable tag to associate with the address.
         self._tag = tag
+        # Subscribe command for the bot invoking this DebtTracker.
+        self._subscribe_command = subscribe_command
         # Path for saving the data for this tracker.
         self._savefile = _get_savefile(address, tag)
         # A datetime representing the last time the state of the tracker was
@@ -434,8 +442,12 @@ class DebtTracker(object):
             print(alert_message, file=short_output)
         _print_title(self.get_name(), debts.time, short_output)
         print('```', file=short_output)
+        _print_short_debts(debts, short_output)
         _print_debt_comparison(prev_debts, debts, short_output)
-        print('```' + MESSAGE_DELIMITER, file=short_output)
+        print('```' + MESSAGE_DELIMITER, file=short_output, end='')
+        print(f'(Type `!{self._subscribe_command}` to get full breakdown.)',
+              file=short_output, end='')
+        print(MESSAGE_DELIMITER, file=short_output)
         short_message = short_output.getvalue()
 
         # Update timestamps and messages.
