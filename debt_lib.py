@@ -28,6 +28,7 @@ ZAPPER_APP_BALANCE_FMT = 'https://api.zapper.fi/v1/protocols/{app}/balances?netw
 SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
 LARGE_RELATIVE_CHANGE = 0.02
 LARGE_ABSOLUTE_CHANGE = 1000000
+MESSAGE_DELIMITER = '================='
 
 
 class DebtPosition(object):
@@ -200,13 +201,13 @@ async def _query_new_debts2(address: str, tag: Optional[str]) -> DebtPosition:
                         individual_debts=debts)
 
 
-def _print_debts(debts: DebtPosition, output):
+def _print_debts(debts: DebtPosition, output: io.StringIO):
     for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
         print(
             f'''{value['tokens']:17,.2f} {value['symbol']:<6s} -- {name}''', file=output)
 
     print('-----------------', file=output)
-    print(f'{debts.total_debt:17,.2f} USD -- Total Debt', file=output)
+    print(f'{debts.total_debt:17,.2f} USD -- Total Debt\n', file=output)
     return
 
 
@@ -260,7 +261,7 @@ def _get_alert_message(prev_debts: DebtPosition,
     return False, ''
 
 
-def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output):
+def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output: io.StringIO):
     if not prev_debts:
         return
 
@@ -307,6 +308,11 @@ def _write_debts(debts: DebtPosition, savefile: str):
     with open(savefile, 'a', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, SAVEFILE_FIELDS)
         writer.writerow(debts.to_csv_row())
+
+
+def _print_title(wallet_name: str, timestamp: datetime, output: io.StringIO):
+    print(
+        f'Debt Positions for {wallet_name} at {utils.display_time(timestamp)} UTC', file=output)
 
 
 class DebtTracker(object):
@@ -383,11 +389,10 @@ class DebtTracker(object):
             return False, f'No debts recorded yet for {self.get_name()}.'
 
         output = io.StringIO()
-        print(
-            f'Debt Positions for {self.get_name()} at {utils.display_time(debts.time)} UTC', file=output)
+        _print_title(self.get_name(), debts.time, output)
         print('```', file=output)
         _print_debts(debts, output)
-        print('```=================', file=output)
+        print('```' + MESSAGE_DELIMITER, file=output)
         message = output.getvalue()
 
         # Update timestamps and messages.
@@ -398,6 +403,11 @@ class DebtTracker(object):
 
         return False, message
 
+    # Performs a new query for debt positions and stores the results as a long
+    # message. The return value is the shortened version of the message. The
+    # _last_update_time is updated to the current debt position time. The
+    # _last_alert_time is updated to the _last_update_time if this debt query
+    # raised an alert.
     async def update(self) -> Tuple[bool, str]:
         address = self._address
         tag = self._tag
@@ -407,18 +417,26 @@ class DebtTracker(object):
         prev_debts = _query_prev_debts(savefile)
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 
+        # Create long message.
         output = io.StringIO()
         if has_alert:
             print(alert_message, file=output)
-        print(
-            f'Debt Positions for {self.get_name()} at {utils.display_time(debts.time)} UTC', file=output)
-
+        _print_title(self.get_name(), debts.time, output)
         print('```', file=output)
         _print_debts(debts, output)
-        print('', file=output)
         _print_debt_comparison(prev_debts, debts, output)
-        print('```=================', file=output)
+        print('```' + MESSAGE_DELIMITER, file=output)
         message = output.getvalue()
+
+        # Create short message.
+        short_output = io.StringIO()
+        if has_alert:
+            print(alert_message, file=short_output)
+        _print_title(self.get_name(), debts.time, short_output)
+        print('```', file=short_output)
+        _print_debt_comparison(prev_debts, debts, short_output)
+        print('```' + MESSAGE_DELIMITER, file=short_output)
+        short_message = short_output.getvalue()
 
         # Update timestamps and messages.
         self._last_update_time = debts.time
@@ -428,4 +446,4 @@ class DebtTracker(object):
 
         _write_debts(debts, savefile)
 
-        return has_alert, message
+        return has_alert, short_message
