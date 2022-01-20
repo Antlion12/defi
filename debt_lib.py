@@ -323,8 +323,8 @@ def _print_title(wallet_name: str, timestamp: datetime, output: io.StringIO):
 class DebtTracker(object):
     def __init__(self,
                  address: str,
+                 tag: str,
                  subscribe_command: str,
-                 tag: Optional[str],
                  last_alert_time: Optional[str]):
         # Address of the wallet being tracked.
         self._address = address
