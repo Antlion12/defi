@@ -6,7 +6,6 @@
 # Creates a savefile CSV called <address>[-<tag>].csv to save results of recent
 # queries.
 
-from absl import flags
 from absl import logging
 from datetime import datetime
 from datetime import timezone
@@ -16,18 +15,19 @@ from typing import Tuple
 from utils import fetch_url
 import asyncio
 import csv
-import enum
 import io
 import json
+import re
 import utils
 
-API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
-ZAPPER_BALANCE_FMT = 'https://api.zapper.fi/v1/balances?api_key={api_key}&addresses[]={address}'
-ZAPPER_SUPPORTED_PROTOS_FMT = 'https://api.zapper.fi/v1/protocols/balances/supported?api_key={api_key}&addresses[]={address}'
-ZAPPER_APP_BALANCE_FMT = 'https://api.zapper.fi/v1/protocols/{app}/balances?network={network}&api_key={api_key}&addresses[]={address}'
-SAVEFILE_FIELDS = ['time', 'address', 'tag', 'total_debt', 'individual_debts']
-LARGE_RELATIVE_CHANGE = 0.02
-LARGE_ABSOLUTE_CHANGE = 1000000
+DEBANK_PROTOCOLS_FMT = 'https://openapi.debank.com/v1/user/complex_protocol_list?id={address}'
+
+SAVEFILE_FIELDS = ['time', 'address', 'tag',
+                   'total_assets', 'total_debt', 'individual_debts']
+LARGE_OVERALL_CHANGE = 1000000  # 1 million USD
+LARGE_INDIVIDUAL_CHANGE = 100000  # 100,000 USD
+LARGE_LTV_CHANGE = 0.05
+MIN_AMOUNT = 100
 MESSAGE_DELIMITER = '================='
 
 
@@ -40,6 +40,8 @@ class DebtPosition(object):
                 self.address = value
             elif key == 'tag':
                 self.tag = value
+            elif key == 'total_assets':
+                self.total_assets = value
             elif key == 'total_debt':
                 self.total_debt = value
             elif key == 'individual_debts':
@@ -54,6 +56,7 @@ class DebtPosition(object):
         self.time = utils.parse_storage_time(dict_in['time'])
         self.address = dict_in['address']
         self.tag = dict_in['tag']
+        self.total_assets = float(dict_in['total_assets'])
         self.total_debt = float(dict_in['total_debt'])
         self.individual_debts = json.loads(dict_in['individual_debts'])
 
@@ -62,152 +65,83 @@ class DebtPosition(object):
         result['time'] = utils.format_storage_time(self.time)
         result['address'] = self.address
         result['tag'] = self.tag
+        result['total_assets'] = self.total_assets
         result['total_debt'] = self.total_debt
         result['individual_debts'] = json.dumps(self.individual_debts)
         return result
 
 
-# Constructs a key for the debts dictionary.
-def _make_key(asset: dict, token: Optional[dict]) -> str:
-    assert asset
-
-    # Collect fields for constructing key.
-    terms = []
-    if token:
-        terms.append(token['network'])
-    else:
-        terms.append(asset['network'])
-    terms.append(asset['appId'])
-    if 'label' in asset:
-        terms.append(asset['label'])
-    elif 'symbol' in asset:
-        terms.append(asset['symbol'])
-
-    key = ' / '.join(terms)
-
-    return key
-
-# Parses app_balance json for debts.
-# Args:
-#   app_balance: Json for the app's balance.
-#   address: Wallet address for which we are scraping debt balances.
-#   debts: An output dictionary for which we store debt balances (key being the
-#       debt description, value being the debt value in tokens).
-
-
-def _parse_app_balance(app_balance: dict, address: str, debts: DebtPosition):
-    for product in app_balance[address]['products']:
-        for asset in product['assets']:
-            logging.debug(f'Found asset: {json.dumps(asset, indent=4)}')
-
-            if 'tokens' not in asset:
-                if asset['balanceUSD'] < 0:
-                    logging.debug(
-                        f'Found debt: {json.dumps(asset, indent=4)}')
-                    # Found a debt position among asset tokens.
-                    key = _make_key(asset, token=None)
-                    debts[key] = {
-                        'usd': -asset['balanceUSD'],
-                        'tokens': asset['balance'],
-                        'symbol': asset['symbol']
-                    }
-            else:
-                for token in asset['tokens']:
-                    if token['balanceUSD'] < 0:
-                        logging.debug(
-                            f'Found debt: {json.dumps(token, indent=4)}')
-                        # Found a debt position among asset tokens.
-                        key = _make_key(asset, token)
-                        debts[key] = {
-                            'usd': -token['balanceUSD'],
-                            'tokens': token['balance'],
-                            'symbol': token['symbol']
-                        }
-
-
 def _compute_total_debt(individual_debts: dict) -> float:
-    return sum(debt['tokens'] for _, debt in individual_debts.items())
+    return sum(debt['usd'] for _, debt in individual_debts.items())
 
 
-# Fetches balances for the address, looks for debts, stores the debts in a
-# dictionary.
-async def _query_new_debts(address: str, tag: Optional[str]) -> DebtPosition:
-    response = await fetch_url(
-        ZAPPER_BALANCE_FMT.format(api_key=API_KEY,
-                                  address=address)
-    )
-    logging.debug('Query Balances Response:\n' + response)
-
-    debts = {}
-    for line in response.splitlines():
-        if not line.startswith('data: '):
-            continue
-        _, content = line.split(' ', 1)
-        if content == 'start' or content == 'end':
+# Parses protocol balance json for debts.
+# Args:
+#   protocol: Json for the protocol's balance.
+#   debt_position: Modifiable DebtPosition that will be updated with the results
+#       of parsing this protocol.
+def _parse_protocol_balance(protocol: dict, debt_position: DebtPosition):
+    for item in protocol['portfolio_item_list']:
+        if 'borrow_token_list' not in item['detail']:
+            # Skip non-debt positions.
             continue
 
-        app_balance = json.loads(content)['balances']
-        _parse_app_balance(app_balance, address, debts)
+        debt_usd = item['stats']['debt_usd_value']
+        asset_usd = item['stats']['asset_usd_value']
+        if not asset_usd:
+            # Skip positions without assets as collateral.
+            continue
 
-    return DebtPosition(time=datetime.now(timezone.utc),
-                        address=address,
-                        tag=tag,
-                        total_debt=_compute_total_debt(debts),
-                        individual_debts=debts)
+        supply_token_symbols = [token['symbol']
+                                for token in item['detail']['supply_token_list']]
+        for borrow_token in item['detail']['borrow_token_list']:
+            key = f'''{protocol['name']} ({protocol['chain']}), supply {"/".join(supply_token_symbols)}, borrow {borrow_token['symbol']}'''
+            price = borrow_token['price']
+            amount = borrow_token['amount']
+            individual_debt_usd = amount * price
+            debt_position.individual_debts[key] = {
+                'usd': individual_debt_usd,
+                'tokens': amount,
+                'symbol': borrow_token['symbol'],
+                'price': price,
+                'token_ltv': individual_debt_usd / (asset_usd + 1e-6),
+                'position_ltv': debt_usd / (asset_usd + 1e-6),
+                'asset_usd': asset_usd
+            }
+        debt_position.total_assets += asset_usd
+        debt_position.total_debt += debt_usd
 
 
-class App(object):
-    def __init__(self, network_in, app_in):
-        self.network = network_in
-        self.app = app_in
-
-
-async def _query_new_debts2(address: str, tag: Optional[str]) -> DebtPosition:
-    # Get app IDs.
+async def _query_new_debts_debank(address: str, tag: Optional[str]) -> DebtPosition:
     protocols_response = await fetch_url(
-        ZAPPER_SUPPORTED_PROTOS_FMT.format(api_key=API_KEY, address=address)
+        DEBANK_PROTOCOLS_FMT.format(address=address)
     )
     protocols = json.loads(protocols_response)
 
-    app_ids = []
+    debt_position = DebtPosition(time=datetime.now(timezone.utc),
+                                 address=address,
+                                 tag=tag,
+                                 total_assets=0,
+                                 total_debt=0,
+                                 individual_debts={})
     for protocol in protocols:
-        for app in protocol['apps']:
-            if app['appId'] != 'tokens':
-                app_ids.append(App(protocol['network'], app['appId']))
+        logging.debug(f'{json.dumps(protocols, indent=4)}')
+        _parse_protocol_balance(protocol, debt_position)
 
-    # Fetch balances per app.
-    app_balance_responses = []
-    fetch_routines = []
-    for app_id in app_ids:
-        logging.debug(f'Querying {app_id.network}/{app_id.app}')
-        fetch_routines.append(fetch_url(
-            ZAPPER_APP_BALANCE_FMT.format(api_key=API_KEY,
-                                          address=address,
-                                          network=app_id.network,
-                                          app=app_id.app)
-        ))
-    app_balance_responses = await asyncio.gather(*fetch_routines)
-
-    # Parse the debt balances from each app.
-    debts = {}
-    for app_balance_response in app_balance_responses:
-        app_balance = json.loads(app_balance_response)
-        _parse_app_balance(app_balance, address, debts)
-
-    return DebtPosition(time=datetime.now(timezone.utc),
-                        address=address,
-                        tag=tag,
-                        total_debt=_compute_total_debt(debts),
-                        individual_debts=debts)
+    return debt_position
 
 
 def _print_debts(debts: DebtPosition, output: io.StringIO):
-    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
-        print(
-            f'''{value['tokens']:17,.2f} {value['symbol']:<6s} -- {name}''', file=output)
+    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['usd']):
+        if value['usd'] < MIN_AMOUNT or value['asset_usd'] < MIN_AMOUNT:
+            # Skip positions with trivial assets or debts.
+            continue
+        display_name = re.sub(r', borrow.*', '', name)
+        print(f'''{value['tokens']:14,.2f} {value['symbol']:<7s} ({value['position_ltv'] * 100:5.1f}% LTV) - {display_name}''', file=output)
 
     print('-----------------', file=output)
-    print(f'{debts.total_debt:17,.2f} USD -- Total Debt\n', file=output)
+    total_ltv = debts.total_debt / (debts.total_assets + 1e-6)
+    print(f'{debts.total_debt:14,.2f} USD Total Debt ({total_ltv * 100:5.1f}% LTV)\n', file=output)
     return
 
 
@@ -231,8 +165,74 @@ def _query_prev_debts(savefile: str) -> Optional[DebtPosition]:
     return DebtPosition(csv_row=last_row) if last_row else None
 
 
+# Iterates through individual debt positions, making sure each position is
+# unique (so if a position exists in both previous and current debts, then it is
+# only returned once).
+#
+# Returns:
+#   name: str of individual debt position name.
+#   prev_debt: dict of the individual debt position's previous values.
+#   curr_debt: dict of the individual debt position's current values.
+def _iterate_individual_debts(prev_debts: DebtPosition, curr_debts: DebtPosition):
+    # Loop through debts in the current debts position.
+    for curr_name, curr_value in sorted(curr_debts.individual_debts.items(), key=lambda x: -x[1]['usd']):
+        if curr_name in prev_debts.individual_debts:
+            prev_value = prev_debts.individual_debts[curr_name]
+        else:
+            prev_value = None
+        yield curr_name, prev_value, curr_value
+
+    # Check debts in prev_debts that don't exist in debts.
+    for prev_name, prev_value in sorted(prev_debts.individual_debts.items(), key=lambda x: -x[1]['usd']):
+        if prev_name in curr_debts.individual_debts:
+            continue
+        yield prev_name, prev_value, None
+
+
+# This iterator yields summary stats on the _differences_ between individual
+# debt positions in the prev_debts and debts DebtPositions.
+#
+# Yields:
+#   * change: Change in USD value for the position.
+#   * prev_ltv: Previous LTV of the individual position.
+#   * curr_ltv: Current LTV of the individual position.
+#   * symbol: Name of the token being borrowed.
+#   * display_name: Name of the position for display purposes
+#       (excludes borrowed token name).
+def _iterate_individual_diffs(prev_debts: DebtPosition,
+                              debts: DebtPosition):
+    for name, prev_debt, curr_debt in _iterate_individual_debts(prev_debts, debts):
+        prev_tokens = prev_debt['tokens'] if prev_debt else 0
+        curr_tokens = curr_debt['tokens'] if curr_debt else 0
+        price = curr_debt['price'] if curr_debt else prev_debt['price']
+        prev_debt_usd = price * prev_tokens
+        curr_debt_usd = price * curr_tokens
+        symbol = curr_debt['symbol'] if curr_debt else prev_debt['symbol']
+        prev_ltv = prev_debt['position_ltv'] if prev_debt else 0
+        curr_ltv = curr_debt['position_ltv'] if curr_debt else 0
+        prev_asset_usd = prev_debt['asset_usd'] if prev_debt else 0
+        curr_asset_usd = curr_debt['asset_usd'] if curr_debt else 0
+
+        # Skip comparing this individual position if the USD value of the assets
+        # (or the debts) in both prev_debts and debts.
+        if ((prev_debt_usd < MIN_AMOUNT and
+             curr_debt_usd < MIN_AMOUNT) or
+            (prev_asset_usd < MIN_AMOUNT and
+             curr_asset_usd < MIN_AMOUNT)):
+            continue
+
+        change = curr_debt_usd - prev_debt_usd
+        display_name = re.sub(r', borrow.*', '', name)
+
+        # Yield the values for this iterator.
+        yield change, prev_ltv, curr_ltv, symbol, display_name
+
+
 def _get_debt_change(prev_debts: DebtPosition, debts: DebtPosition) -> float:
-    return debts.total_debt - prev_debts.total_debt
+    total_change_usd = 0
+    for change, _, _, _, _ in _iterate_individual_diffs(prev_debts, debts):
+        total_change_usd += change
+    return total_change_usd
 
 
 def _get_relative_debt_change(prev_debts: DebtPosition,
@@ -245,23 +245,48 @@ def _get_relative_debt_change(prev_debts: DebtPosition,
 # Returns:
 #   bool: Whether an alert should be raised.
 #   str: Contents of the alert message.
-def _get_alert_message(prev_debts: DebtPosition,
-                       debts: DebtPosition) -> Tuple[bool, str]:
+def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition) -> Tuple[bool, str]:
     if not prev_debts:
         return True, 'Starting a new debt log.'
 
-    change = _get_debt_change(prev_debts, debts)
-    relative_change = _get_relative_debt_change(prev_debts, debts)
-    time_diff = debts.time - prev_debts.time
+    overall_change = _get_debt_change(prev_debts, debts)
+    overall_relative_change = _get_relative_debt_change(prev_debts, debts)
 
-    if change >= LARGE_ABSOLUTE_CHANGE:
-        return True, f'💳🤝💵 Significant INCREASE in debt ({change:,} USD). Bullish.'
-    elif relative_change >= LARGE_RELATIVE_CHANGE:
-        return True, f'💳🤝💵 Significant INCREASE in debt ({relative_change * 100:.2f})%. Bullish.'
-    elif change <= -LARGE_ABSOLUTE_CHANGE:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({change:,} USD). We gonna get rekt?'
-    elif relative_change <= -LARGE_RELATIVE_CHANGE:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({relative_change * 100:.2f}%). We gonna get rekt?'
+    # Check for large total increases or decreases.
+    if overall_change >= LARGE_OVERALL_CHANGE:
+        return True, f'💳🤝💵 Significant INCREASE in debt ({overall_change:,} USD, {overall_relative_change * 100:+.2f})%). Bullish.'
+    if overall_change <= -LARGE_OVERALL_CHANGE:
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({overall_change:,} USD, {overall_relative_change * 100:+.2f})%). We gonna get rekt?'
+
+    # Check for singificant individual changes.
+    large_individual_debt_increase = False
+    large_individual_debt_decrease = False
+    large_ltv_increase = False
+    large_ltv_decrease = False
+    for change, prev_ltv, curr_ltv, _, _ in _iterate_individual_diffs(prev_debts, debts):
+        if change >= LARGE_INDIVIDUAL_CHANGE:
+            large_individual_debt_increase = True
+        if change <= -LARGE_INDIVIDUAL_CHANGE:
+            large_individual_debt_decrease = True
+        if curr_ltv - prev_ltv >= LARGE_LTV_CHANGE:
+            large_ltv_increase = True
+        if curr_ltv - prev_ltv <= -LARGE_LTV_CHANGE:
+            large_ltv_decrease = True
+
+    if large_individual_debt_increase and not large_individual_debt_decrease:
+        return True, f'💵 Significant increase in individual debt position.'
+    elif large_individual_debt_decrease and not large_individual_debt_increase:
+        return True, f'🚨 Significant reduction in individual debt position.'
+    elif large_individual_debt_increase and large_individual_debt_decrease:
+        return True, f'👀 Significant churn in individual debt positions.'
+
+    # If no alerts triggered up to this point, check for LTV changes.
+    if large_ltv_increase and not large_ltv_decrease:
+        return True, f'👀 Significant LTV increase in individual positions.'
+    elif large_ltv_decrease and not large_ltv_increase:
+        return True, f'👀 Significant LTV decrease in individual positions.'
+    elif large_ltv_increase and large_ltv_decrease:
+        return True, f'👀 Significant LTV churn in individual positions.'
 
     return False, ''
 
@@ -274,39 +299,25 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
     assert prev_debts.tag == debts.tag
     assert prev_debts.time <= debts.time
 
-    change = _get_debt_change(prev_debts, debts)
-    relative_change = _get_relative_debt_change(prev_debts, debts)
+    overall_change = _get_debt_change(prev_debts, debts)
+    overall_relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
     print(
-        f'Change: {change:+,.2f} USD ({relative_change * 100:+.4f}%)', end='', file=output)
+        f'Change: {overall_change:+,.2f} USD ({overall_relative_change * 100:+.4f}%)', end='', file=output)
     print(
         f' compared to {utils.display_time(prev_debts.time)} UTC ({utils.format_timedelta(time_diff)} ago).', file=output)
 
-    # Loop through debts in the current debts position.
-    individual_changes = []
-    for name, value in sorted(debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
-        if name in prev_debts.individual_debts:
-            prev_tokens = prev_debts.individual_debts[name]['tokens']
-        else:
-            prev_tokens = 0
-        individual_change = value['tokens'] - prev_tokens
-        individual_changes.append([individual_change, value['symbol'], name])
-
-    # Check debts in prev_debts that don't exist in debts.
-    for name, value in sorted(prev_debts.individual_debts.items(), key=lambda x: -x[1]['tokens']):
-        if name in debts.individual_debts:
-            continue
-        individual_change = -value['tokens']
-        individual_changes.append([individual_change, value['symbol'], name])
-
-    printed_notable_change = False
-    for individual_change, symbol, name in sorted(individual_changes, key=lambda x: -abs(x[0])):
-        if abs(individual_change) >= LARGE_ABSOLUTE_CHANGE * 0.05:
-            if not printed_notable_change:
+    # Loop through individual debt positions.
+    printed_notable_change_header = False
+    for change, prev_ltv, curr_ltv, symbol, display_name in _iterate_individual_diffs(prev_debts, debts):
+        if (abs(change) >= LARGE_INDIVIDUAL_CHANGE or
+                abs(curr_ltv - prev_ltv) >= LARGE_LTV_CHANGE):
+            if not printed_notable_change_header:
                 print('\nNotable changes:', file=output)
-                printed_notable_change = True
+                printed_notable_change_header = True
+            print(f'''{change:+14,.2f} {symbol:<7s}''', file=output, end='')
             print(
-                f'''{individual_change:+17,.2f} {symbol:<6s} -- {name}''', file=output)
+                f''' (LTV: {prev_ltv * 100:5.1f}% --> {curr_ltv * 100:5.1f}%) - {display_name}''', file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
@@ -421,7 +432,7 @@ class DebtTracker(object):
         tag = self._tag
         savefile = self._savefile
 
-        debts = await _query_new_debts2(address, tag)
+        debts = await _query_new_debts_debank(address, tag)
         prev_debts = _query_prev_debts(savefile)
         has_alert, alert_message = _get_alert_message(prev_debts, debts)
 
