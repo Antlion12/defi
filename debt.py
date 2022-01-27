@@ -29,14 +29,14 @@ flags.mark_flag_as_required('address')
 
 
 async def run_tracker(tracker):
-    _, message = await tracker.update()
-    print(message)
+    await tracker.update()
+    print(tracker.get_last_message())
 
 
 def main(argv):
     address = FLAGS.address.lower()
     tag = FLAGS.tag
-    tracker = DebtTracker(address, tag)
+    tracker = DebtTracker(address, tag, 'commandline', last_alert_time=None)
     asyncio.run(run_tracker(tracker))
 
 
