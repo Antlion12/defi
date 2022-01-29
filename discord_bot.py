@@ -362,7 +362,8 @@ class AntlionDeFiBot(discord.Client):
         # Print remaining contents from buffer.
         if in_code_block:
             buffer += '```\n'
-        await channel.send(buffer)
+        if buffer:
+            await channel.send(buffer)
 
     # This loop periodically checks the alert queue for alerts to send.
     @tasks.loop(seconds=10)
