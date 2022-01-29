@@ -22,6 +22,7 @@ from debt_lib import DebtTracker
 from discord.ext import tasks
 from pathlib import Path
 from typing import List
+from typing import Optional
 from typing import Tuple
 
 import asyncio
@@ -39,6 +40,7 @@ flags.DEFINE_string('config', 'config.json',
 # Max amount of time to wait between broadcasting updates.
 WAIT_PERIOD_MINUTES = 8 * 60
 USAGE = '''You may check current debt positions by typing in the command: `!{command}`
+If you want to track a new wallet, please enter: `!{command} <address> <tag>`
 You may also wait for automatic updates.'''
 MAX_MESSAGE_LENGTH = 2000
 
@@ -104,8 +106,35 @@ class Config(object):
         address = tracker_json['address']
         tag = tracker_json.get('tag')
         last_alert_time = tracker_json.get('last_alert_time')
+        channels = tracker_json.get('channels')
         return DebtTracker(address, tag, self.subscribe_command,
-                           last_alert_time)
+                           last_alert_time, channels)
+
+    # Adds or updates the tracker for address/tag with the channel_id. Returns
+    # the DebtTracker object associated with this update.
+    async def add_and_return_tracker(self, address: str, tag: Optional[str], channel_id: int) -> DebtTracker:
+        # Find the matching tracker for address/tag (and if it doesn't exist,
+        # create one).
+        tracker = None
+        for curr_tracker in self.trackers:
+            if (curr_tracker.get_address() == address and
+                    curr_tracker.get_tag() == tag):
+                tracker = curr_tracker
+        if not tracker:
+            tracker = DebtTracker(address=address,
+                                  tag=tag,
+                                  subscribe_command=self.subscribe_command,
+                                  last_alert_time=None,
+                                  channels=None)
+            await tracker.update()  # Query new debts for the first time.
+            self.trackers.append(tracker)
+
+        # Add the channel info to the tracker if it doesn't already exist.
+        if not tracker.has_channel(channel_id):
+            tracker.add_channel(channel_id)
+
+        self.save_config()
+        return tracker
 
     def save_config(self):
         config_dict = {
@@ -118,13 +147,20 @@ class Config(object):
         for t in self.trackers:
             tracker_json = {}
             tracker_json['address'] = t.get_address()
+
             tag = t.get_tag()
             if tag:
                 tracker_json['tag'] = tag
+
             last_alert_time = t.get_last_alert_time()
             if last_alert_time:
                 tracker_json['last_alert_time'] = utils.format_storage_time(
                     last_alert_time)
+
+            channels = t.get_channels()
+            if channels:
+                tracker_json['channels'] = channels
+
             config_dict['trackers'].append(tracker_json)
 
         # Create a backup first.
@@ -186,6 +222,24 @@ class AntlionDeFiBot(discord.Client):
         self._alerts_queue.put(
             Alert(channel_id, message, urgent, wait_period_expired))
 
+    async def schedule_alerts_for_channel(self, channel: discord.TextChannel):
+        tracker_count = 0
+        for tracker in self._config.trackers:
+            if tracker.has_channel(channel.id):
+                tracker_count += 1
+                self.schedule_alert(channel.id, tracker.get_last_message(),
+                                    urgent=False,
+                                    wait_period_expired=False)
+        if tracker_count == 0:
+            await channel.send(f'This channel is not tracking any wallets.')
+
+    def tracker_count_for_channel(self, channel_id: int) -> int:
+        tracker_count = 0
+        for tracker in self._config.trackers:
+            if tracker.has_channel(channel_id):
+                tracker_count += 1
+        return tracker_count
+
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
         # Schedule alert for this channel containing current messages.
@@ -193,6 +247,7 @@ class AntlionDeFiBot(discord.Client):
             channel = self.get_channel(channel_id)
             await channel.send('hello sers. I have returned.')
             await channel.send(USAGE.format(command=self._config.subscribe_command))
+            await channel.send(f'Number of wallets tracked: {self.tracker_count_for_channel(channel_id)}')
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -204,25 +259,38 @@ class AntlionDeFiBot(discord.Client):
             channel_id = message.channel.id
             channel_name = f'{message.channel.guild.name}#{message.channel.name}'
 
-            if self._config.is_subscribed(channel_id):
+            message_tokens = message.content.split()
+
+            if self._config.is_subscribed(channel_id) and len(message_tokens) > 1:
+                # Add/update a tracker for the given address and tag using this
+                # channel.
+                address = message_tokens[1]
+                tag = ' '.join(message_tokens[2:]) if len(
+                    message_tokens) >= 3 else None
+                print(
+                    f'User {message.author} requested update on address {address}, tag {tag}.')
+                await message.channel.send(f'{message.author.mention} requested an update on address {address}, tag "{tag}". Coming right up...')
+
+                tracker = await self._config.add_and_return_tracker(address, tag, channel_id)
+                self.schedule_alert(channel_id, tracker.get_last_message(),
+                                    urgent=False,
+                                    wait_period_expired=False)
+            elif self._config.is_subscribed(channel_id):
+                # Already subscribed. Requesting update.
                 print(f'User {message.author} requested update.')
                 await message.channel.send(f'{message.author.mention} requested an update. Coming right up...')
-            else:
+                await self.schedule_alerts_for_channel(message.channel)
+            elif len(message_tokens) == 1:
                 # This is a new subscription.
                 self._config.subscribe_channel(channel_id, channel_name)
 
                 await message.channel.send('gm')
                 await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
                 await message.channel.send(USAGE.format(command=self._config.subscribe_command))
-                await message.channel.send('For now, I will share with you the current debts I am tracking.')
+                await message.channel.send('For now, I will share the current debts tracked in this channel.')
 
                 print(f'Subscribed to {channel_name} ({channel_id})')
-
-            # Schedule alert for this channel containing current messages.
-            for tracker in self._config.trackers:
-                self.schedule_alert(channel_id, tracker.get_last_message(),
-                                    urgent=False,
-                                    wait_period_expired=False)
+                await self.schedule_alerts_for_channel(message.channel)
 
     # This loop periodically updates the DebtTracker with the latest debt
     # information for the specified user. An alert is scheduled if the update
@@ -254,8 +322,9 @@ class AntlionDeFiBot(discord.Client):
                 tracker.sync_last_alert_time()
                 # Raise alerts only if we have subscribed to channels.
                 for channel_id in self._config.get_subscribed_channels():
-                    self.schedule_alert(channel_id, message,
-                                        has_alert, wait_period_expired)
+                    if tracker.has_channel(channel_id):
+                        self.schedule_alert(channel_id, message,
+                                            has_alert, wait_period_expired)
 
             # Saves config state after updating this tracker.
             self._config.save_config()
