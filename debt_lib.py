@@ -10,6 +10,7 @@ from absl import logging
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
+from typing import List
 from typing import Optional
 from typing import Tuple
 from utils import fetch_url
@@ -336,7 +337,8 @@ class DebtTracker(object):
                  address: str,
                  tag: str,
                  subscribe_command: str,
-                 last_alert_time: Optional[str]):
+                 last_alert_time: Optional[str],
+                 channels: Optional[List[int]]):
         # Address of the wallet being tracked.
         self._address = address
         # A human-readable tag to associate with the address.
@@ -348,6 +350,9 @@ class DebtTracker(object):
         # A datetime representing the last time the state of the tracker was
         # updated. This is set after running the get_last_update() call.
         self._last_update_time = utils.MIN_TIME
+        # A list of channel IDs subscribed to this tracker.
+        self._channels = channels if channels else []
+
         # The last time the tracker raised an alert. This is set internally by
         # the sync_last_alert_time() call, as well as externally during
         # construction.
@@ -355,9 +360,10 @@ class DebtTracker(object):
             self._last_alert_time = utils.parse_storage_time(last_alert_time)
         else:
             self._last_alert_time = utils.MIN_TIME
+
         # The contents of the latest message that was produced from running
         # update() or _get_last_update().
-        self._last_message = f'Track for {self.get_name()} just initialized.'
+        self._last_message = f'Tracker for {self.get_name()} just initialized.'
 
         # Creates a new savefile if needed.
         if not Path(self._savefile).is_file():
@@ -388,6 +394,15 @@ class DebtTracker(object):
 
     def get_last_message(self) -> str:
         return self._last_message
+
+    def get_channels(self) -> List[int]:
+        return self._channels
+
+    def has_channel(self, channel_id: int) -> bool:
+        return channel_id in self._channels
+
+    def add_channel(self, channel_id: int):
+        self._channels.append(channel_id)
 
     # Sets the last alert time to the last update time. This is useful when
     # there is some caller that is using a different criteria for triggering an
