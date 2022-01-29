@@ -299,7 +299,7 @@ class AntlionDeFiBot(discord.Client):
     @tasks.loop(seconds=300)
     async def update_task(self):
         print(
-            'Running update task at {utils.display_time(datetime.now(timezone.utc))} UTC.')
+            f'Running update task at {utils.display_time(datetime.now(timezone.utc))} UTC.')
         for tracker in self._config.trackers:
             try:
                 has_alert, message = await tracker.update()
@@ -378,10 +378,10 @@ class AntlionDeFiBot(discord.Client):
         while not queue.empty():
             alert = queue.get()
             channel = self.get_channel(alert.channel_id)
-            await self.send_long_message(channel, alert.message)
             print(
-                f'Sent alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
+                f'Sending alert to {self._config.get_channel_name(alert.channel_id)} with the following message:')
             print(alert.message)
+            await self.send_long_message(channel, alert.message)
             queue.task_done()
 
     @alert_task.before_loop
