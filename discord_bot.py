@@ -269,7 +269,7 @@ class AntlionDeFiBot(discord.Client):
                     message_tokens) >= 3 else None
                 print(
                     f'User {message.author} requested update on address {address}, tag {tag}.')
-                await message.channel.send(f'{message.author.mention} requested an update on address {address}, tag "{tag}". Coming right up...')
+                await message.channel.send(f'{message.author.mention} requested a tracker for {address} ({tag}). Coming right up...')
 
                 tracker = await self._config.add_and_return_tracker(address, tag, channel_id)
                 self.schedule_alert(channel_id, tracker.get_last_message(),
