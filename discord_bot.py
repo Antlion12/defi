@@ -107,8 +107,9 @@ class Config(object):
         tag = tracker_json.get('tag')
         last_alert_time = tracker_json.get('last_alert_time')
         channels = tracker_json.get('channels')
+        ignorable_debts = tracker_json.get('ignorable_debts')
         return DebtTracker(address, tag, self.subscribe_command,
-                           last_alert_time, channels)
+                           last_alert_time, channels, ignorable_debts)
 
     # Adds or updates the tracker for address/tag with the channel_id. Returns
     # the DebtTracker object associated with this update.
@@ -125,7 +126,8 @@ class Config(object):
                                   tag=tag,
                                   subscribe_command=self.subscribe_command,
                                   last_alert_time=None,
-                                  channels=None)
+                                  channels=None,
+                                  ignorable_debts=None)
             await tracker.update()  # Query new debts for the first time.
             self.trackers.append(tracker)
 
@@ -146,20 +148,15 @@ class Config(object):
         }
         for t in self.trackers:
             tracker_json = {}
-            tracker_json['address'] = t.get_address()
 
+            tracker_json['address'] = t.get_address()
             tag = t.get_tag()
             if tag:
                 tracker_json['tag'] = tag
-
-            last_alert_time = t.get_last_alert_time()
-            if last_alert_time:
-                tracker_json['last_alert_time'] = utils.format_storage_time(
-                    last_alert_time)
-
-            channels = t.get_channels()
-            if channels:
-                tracker_json['channels'] = channels
+            tracker_json['last_alert_time'] = utils.format_storage_time(
+                t.get_last_alert_time())
+            tracker_json['channels'] = t.get_channels()
+            tracker_json['ignorable_debts'] = t.get_ignorable_debts()
 
             config_dict['trackers'].append(tracker_json)
 

@@ -246,7 +246,7 @@ def _get_relative_debt_change(prev_debts: DebtPosition,
 # Returns:
 #   bool: Whether an alert should be raised.
 #   str: Contents of the alert message.
-def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition) -> Tuple[bool, str]:
+def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition, ignorable_debts: List[str]) -> Tuple[bool, str]:
     if not prev_debts:
         return True, 'Starting a new debt log.'
 
@@ -264,7 +264,11 @@ def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition) -> Tuple[b
     large_individual_debt_decrease = False
     large_ltv_increase = False
     large_ltv_decrease = False
-    for change, prev_ltv, curr_ltv, _, _ in _iterate_individual_diffs(prev_debts, debts):
+    for change, prev_ltv, curr_ltv, _, display_name in _iterate_individual_diffs(prev_debts, debts):
+        if display_name in ignorable_debts:
+            print(f'Ignored alert check for this position: {display_name}')
+            continue
+
         if change >= LARGE_INDIVIDUAL_CHANGE:
             large_individual_debt_increase = True
         if change <= -LARGE_INDIVIDUAL_CHANGE:
@@ -292,7 +296,7 @@ def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition) -> Tuple[b
     return False, ''
 
 
-def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output: io.StringIO):
+def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, ignorable_debts: List[str], output: io.StringIO):
     if not prev_debts:
         return
 
@@ -311,6 +315,9 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, output
     # Loop through individual debt positions.
     printed_notable_change_header = False
     for change, prev_ltv, curr_ltv, symbol, display_name in _iterate_individual_diffs(prev_debts, debts):
+        if display_name in ignorable_debts:
+            print(f'Ignored debt comparison for this position: {display_name}')
+            continue
         if (abs(change) >= LARGE_INDIVIDUAL_CHANGE or
                 abs(curr_ltv - prev_ltv) >= LARGE_LTV_CHANGE):
             if not printed_notable_change_header:
@@ -338,7 +345,8 @@ class DebtTracker(object):
                  tag: str,
                  subscribe_command: str,
                  last_alert_time: Optional[str],
-                 channels: Optional[List[int]]):
+                 channels: Optional[List[int]],
+                 ignorable_debts: Optional[List[str]]):
         # Address of the wallet being tracked.
         self._address = address
         # A human-readable tag to associate with the address.
@@ -352,6 +360,8 @@ class DebtTracker(object):
         self._last_update_time = utils.MIN_TIME
         # A list of channel IDs subscribed to this tracker.
         self._channels = channels if channels else []
+        # List of debt positions for which we ignore alerts.
+        self._ignorable_debts = ignorable_debts if ignorable_debts else []
 
         # The last time the tracker raised an alert. This is set internally by
         # the sync_last_alert_time() call, as well as externally during
@@ -404,6 +414,9 @@ class DebtTracker(object):
     def add_channel(self, channel_id: int):
         self._channels.append(channel_id)
 
+    def get_ignorable_debts(self) -> List[str]:
+        return self._ignorable_debts
+
     # Sets the last alert time to the last update time. This is useful when
     # there is some caller that is using a different criteria for triggering an
     # alert.
@@ -446,10 +459,12 @@ class DebtTracker(object):
         address = self._address
         tag = self._tag
         savefile = self._savefile
+        ignorable_debts = self._ignorable_debts
 
         debts = await _query_new_debts_debank(address, tag)
         prev_debts = _query_prev_debts(savefile)
-        has_alert, alert_message = _get_alert_message(prev_debts, debts)
+        has_alert, alert_message = _get_alert_message(
+            prev_debts, debts, ignorable_debts)
 
         # Create long message.
         output = io.StringIO()
@@ -458,7 +473,7 @@ class DebtTracker(object):
         _print_title(self.get_name(), debts.time, output)
         print('```', file=output)
         _print_debts(debts, output)
-        _print_debt_comparison(prev_debts, debts, output)
+        _print_debt_comparison(prev_debts, debts, ignorable_debts, output)
         print('```' + MESSAGE_DELIMITER, file=output)
         message = output.getvalue()
 
@@ -469,7 +484,8 @@ class DebtTracker(object):
         _print_title(self.get_name(), debts.time, short_output)
         print('```', file=short_output)
         _print_short_debts(debts, short_output)
-        _print_debt_comparison(prev_debts, debts, short_output)
+        _print_debt_comparison(
+            prev_debts, debts, ignorable_debts, short_output)
         print('```' + MESSAGE_DELIMITER, file=short_output, end='')
         print(f'(Type `!{self._subscribe_command}` to get full breakdown.)',
               file=short_output, end='')
