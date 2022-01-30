@@ -190,16 +190,38 @@ def _iterate_individual_debts(prev_debts: DebtPosition, curr_debts: DebtPosition
         yield prev_name, prev_value, None
 
 
-# This iterator yields summary stats on the _differences_ between individual
-# debt positions in the prev_debts and debts DebtPositions.
+# Summarizes the differences between the previous and current values of a debt
+# position.
 #
-# Yields:
-#   * change: Change in USD value for the position.
+# Fields:
+#   * change_usd: Change in USD value for the position.
+#   * change_tokens: Change in token count for the position.
 #   * prev_ltv: Previous LTV of the individual position.
 #   * curr_ltv: Current LTV of the individual position.
 #   * symbol: Name of the token being borrowed.
 #   * display_name: Name of the position for display purposes
 #       (excludes borrowed token name).
+class DebtDiff(object):
+    def __init__(self,
+                 change_usd,
+                 change_tokens,
+                 prev_ltv,
+                 curr_ltv,
+                 symbol,
+                 display_name):
+        self.change_usd = change_usd
+        self.change_tokens = change_tokens
+        self.prev_ltv = prev_ltv
+        self.curr_ltv = curr_ltv
+        self.symbol = symbol
+        self.display_name = display_name
+
+
+# This iterator yields summary stats on the _differences_ between individual
+# debt positions in the prev_debts and debts DebtPositions.
+#
+# Yields:
+#   * DebtDiff object.
 def _iterate_individual_diffs(prev_debts: DebtPosition,
                               debts: DebtPosition):
     for name, prev_debt, curr_debt in _iterate_individual_debts(prev_debts, debts):
@@ -222,17 +244,28 @@ def _iterate_individual_diffs(prev_debts: DebtPosition,
              curr_asset_usd < MIN_AMOUNT)):
             continue
 
-        change = curr_debt_usd - prev_debt_usd
+        change_usd = curr_debt_usd - prev_debt_usd
+        change_tokens = curr_tokens - prev_tokens
+        # Because it's possible to borrow different kinds of tokens from a given
+        # collateral supply, we want the display name to list just the platform
+        # and the collateral (no need to list the tokens borrowed, since that
+        # will already be displayed elsewhere in the output).
         display_name = re.sub(r', borrow.*', '', name)
 
         # Yield the values for this iterator.
-        yield change, prev_ltv, curr_ltv, symbol, display_name
+        yield DebtDiff(
+            change_usd=change_usd,
+            change_tokens=change_tokens,
+            prev_ltv=prev_ltv,
+            curr_ltv=curr_ltv,
+            symbol=symbol,
+            display_name=display_name)
 
 
 def _get_debt_change(prev_debts: DebtPosition, debts: DebtPosition) -> float:
     total_change_usd = 0
-    for change, _, _, _, _ in _iterate_individual_diffs(prev_debts, debts):
-        total_change_usd += change
+    for diff in _iterate_individual_diffs(prev_debts, debts):
+        total_change_usd += diff.change_usd
     return total_change_usd
 
 
@@ -264,18 +297,18 @@ def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition, ignorable_
     large_individual_debt_decrease = False
     large_ltv_increase = False
     large_ltv_decrease = False
-    for change, prev_ltv, curr_ltv, _, display_name in _iterate_individual_diffs(prev_debts, debts):
-        if display_name in ignorable_debts:
+    for diff in _iterate_individual_diffs(prev_debts, debts):
+        if diff.display_name in ignorable_debts:
             print(f'Ignored alert check for this position: {display_name}')
             continue
 
-        if change >= LARGE_INDIVIDUAL_CHANGE:
+        if diff.change_usd >= LARGE_INDIVIDUAL_CHANGE:
             large_individual_debt_increase = True
-        if change <= -LARGE_INDIVIDUAL_CHANGE:
+        if diff.change_usd <= -LARGE_INDIVIDUAL_CHANGE:
             large_individual_debt_decrease = True
-        if curr_ltv - prev_ltv >= LARGE_LTV_CHANGE:
+        if diff.curr_ltv - diff.prev_ltv >= LARGE_LTV_CHANGE:
             large_ltv_increase = True
-        if curr_ltv - prev_ltv <= -LARGE_LTV_CHANGE:
+        if diff.curr_ltv - diff.prev_ltv <= -LARGE_LTV_CHANGE:
             large_ltv_decrease = True
 
     if large_individual_debt_increase and not large_individual_debt_decrease:
@@ -314,18 +347,16 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, ignora
 
     # Loop through individual debt positions.
     printed_notable_change_header = False
-    for change, prev_ltv, curr_ltv, symbol, display_name in _iterate_individual_diffs(prev_debts, debts):
-        if display_name in ignorable_debts:
+    for diff in _iterate_individual_diffs(prev_debts, debts):
+        if diff.display_name in ignorable_debts:
             print(f'Ignored debt comparison for this position: {display_name}')
             continue
-        if (abs(change) >= LARGE_INDIVIDUAL_CHANGE or
-                abs(curr_ltv - prev_ltv) >= LARGE_LTV_CHANGE):
+        if (abs(diff.change_usd) >= LARGE_INDIVIDUAL_CHANGE or
+                abs(diff.curr_ltv - diff.prev_ltv) >= LARGE_LTV_CHANGE):
             if not printed_notable_change_header:
                 print('\nNotable changes:', file=output)
                 printed_notable_change_header = True
-            print(f'''{change:+14,.2f} {symbol:<7s}''', file=output, end='')
-            print(
-                f''' (LTV: {prev_ltv * 100:5.1f}% --> {curr_ltv * 100:5.1f}%) - {display_name}''', file=output)
+            print(f'''{diff.change_tokens:+14,.2f} {diff.symbol:<7s} (LTV: {diff.prev_ltv * 100:5.1f}% --> {diff.curr_ltv * 100:5.1f}%) - {diff.display_name}''', file=output)
 
 
 def _write_debts(debts: DebtPosition, savefile: str):
