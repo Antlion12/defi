@@ -2,7 +2,7 @@
 # debt positions for a specified wallet address.
 #
 # Requires Python version >= 3.6.
-# This library queries the Zapper API.
+# This library queries the DeBank API.
 # Creates a savefile CSV called <address>[-<tag>].csv to save results of recent
 # queries.
 
@@ -288,9 +288,9 @@ def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition, ignorable_
 
     # Check for large total increases or decreases.
     if overall_change >= LARGE_OVERALL_CHANGE:
-        return True, f'💳🤝💵 Significant INCREASE in debt ({overall_change:,} USD, {overall_relative_change * 100:+.2f})%). Bullish.'
+        return True, f'💳🤝💵 Significant INCREASE in debt ({overall_change:+,.2f} USD, {overall_relative_change * 100:+.2f}%)). Bullish.'
     if overall_change <= -LARGE_OVERALL_CHANGE:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({overall_change:,} USD, {overall_relative_change * 100:+.2f})%). We gonna get rekt?'
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({overall_change:+,.2f} USD, {overall_relative_change * 100:+.2f}%)). We gonna get rekt?'
 
     # Check for singificant individual changes.
     large_individual_debt_increase = False
@@ -341,7 +341,7 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, ignora
     overall_relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
     print(
-        f'Change: {overall_change:+,.2f} USD ({overall_relative_change * 100:+.4f}%)', end='', file=output)
+        f'Change: {overall_change:+,.2f} USD ({overall_relative_change * 100:+.2f}%)', end='', file=output)
     print(
         f' compared to {utils.display_time(prev_debts.time)} UTC ({utils.format_timedelta(time_diff)} ago).', file=output)
 
