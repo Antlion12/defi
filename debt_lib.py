@@ -288,9 +288,9 @@ def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition, ignorable_
 
     # Check for large total increases or decreases.
     if overall_change >= LARGE_OVERALL_CHANGE:
-        return True, f'💳🤝💵 Significant INCREASE in debt ({overall_change:+,.2f} USD, {overall_relative_change * 100:+.2f}%)). Bullish.'
+        return True, f'💳🤝💵 Significant INCREASE in debt ({overall_change:+,.2f} USD, {overall_relative_change * 100:+.1f}%). Bullish.'
     if overall_change <= -LARGE_OVERALL_CHANGE:
-        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({overall_change:+,.2f} USD, {overall_relative_change * 100:+.2f}%)). We gonna get rekt?'
+        return True, f'🚨🚨🚨🚨🚨 ALERT: Significant REDUCTION in debt ({overall_change:+,.2f} USD, {overall_relative_change * 100:+.1f}%). We gonna get rekt?'
 
     # Check for singificant individual changes.
     large_individual_debt_increase = False
@@ -341,7 +341,7 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, ignora
     overall_relative_change = _get_relative_debt_change(prev_debts, debts)
     time_diff = debts.time - prev_debts.time
     print(
-        f'Change: {overall_change:+,.2f} USD ({overall_relative_change * 100:+.2f}%)', end='', file=output)
+        f'Change: {overall_change:+,.2f} USD ({overall_relative_change * 100:+.1f}%)', end='', file=output)
     print(
         f' compared to {utils.display_time(prev_debts.time)} UTC ({utils.format_timedelta(time_diff)} ago).', file=output)
 
@@ -418,7 +418,7 @@ class DebtTracker(object):
     def get_name(self) -> str:
         name = self._address
         if self._tag:
-            name += f' ({self._tag})'
+            name += f' (**{self._tag}**)'
         return name
 
     def get_address(self) -> str:
