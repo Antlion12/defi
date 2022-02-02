@@ -382,7 +382,7 @@ class DebtTracker(object):
         self._address = address
         # A human-readable tag to associate with the address.
         self._tag = tag
-        # Subscribe command for the bot invoking this DebtTracker.
+        # Subscribe command for the bot invoking this tracker.
         self._subscribe_command = subscribe_command
         # Path for saving the data for this tracker.
         self._savefile = _get_savefile(address, tag)
@@ -457,8 +457,6 @@ class DebtTracker(object):
     # An internal function that fetches the current state of the tracker without
     # performing new queries.
     def _get_last_update(self) -> Tuple[bool, str]:
-        address = self._address
-        tag = self._tag
         savefile = self._savefile
 
         debts = _query_prev_debts(savefile)
