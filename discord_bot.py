@@ -20,6 +20,7 @@ from datetime import timedelta
 from datetime import timezone
 from debt_lib import DebtTracker
 from discord.ext import tasks
+from name_lib import NameTracker
 from pathlib import Path
 from typing import List
 from typing import Optional
@@ -32,6 +33,7 @@ import queue
 import shutil
 import traceback
 import utils
+
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('config', 'config.json',
@@ -46,8 +48,9 @@ MAX_MESSAGE_LENGTH = 2000
 
 
 class Config(object):
-    def __init__(self, config_file: str):
+    def __init__(self, config_file: str, client: discord.Client):
         self._config_file = config_file
+        self._client = client
 
         # Default values.
         # Discord bot token.
@@ -74,6 +77,8 @@ class Config(object):
 
         # Fetches the bot's token.
         self.token = config_json.get('token')
+        # Discord bot's token must be defined.
+        assert self.token
 
         # Loads channels that the bot is subscribed to.
         if 'channels' in config_json:
@@ -92,9 +97,6 @@ class Config(object):
             for tracker_json in config_json['trackers']:
                 self.trackers.append(self.parse_tracker(tracker_json))
 
-        # Discord bot's token must be defined.
-        assert self.token
-
         print(f'Subscribed to these channels: {self.channels}')
         print(
             f'Max wait period {utils.format_timedelta(self.max_wait_period)} between alerts.')
@@ -103,16 +105,32 @@ class Config(object):
                 f'Tracking {tracker.get_name()}. Last update: {tracker.get_last_update_time()}. Last alert: {tracker.get_last_alert_time()}.')
 
     def parse_tracker(self, tracker_json: dict) -> DebtTracker:
-        address = tracker_json['address']
-        tag = tracker_json.get('tag')
-        last_alert_time = tracker_json.get('last_alert_time')
-        channels = tracker_json.get('channels')
-        ignorable_debts = tracker_json.get('ignorable_debts')
-        return DebtTracker(address, tag, self.subscribe_command,
-                           last_alert_time, channels, ignorable_debts)
+        tracker_type = tracker_json['type']
+        if tracker_type == DebtTracker.__name__:
+            address = tracker_json['address']
+            tag = tracker_json.get('tag')
+            last_alert_time = tracker_json.get('last_alert_time')
+            channels = tracker_json.get('channels')
+            ignorable_debts = tracker_json.get('ignorable_debts')
+            return DebtTracker(address, tag, self.subscribe_command,
+                               last_alert_time, channels, ignorable_debts)
+        elif tracker_type == NameTracker.__name__:
+            user_id = tracker_json['user_id']
+            tag = tracker_json['tag']
+            last_alert_time = tracker_json.get('last_alert_time')
+            channels = tracker_json.get('channels')
+            return NameTracker(client=self._client,
+                               user_id=user_id,
+                               tag=tag,
+                               subscribe_command=self.subscribe_command,
+                               last_alert_time=last_alert_time,
+                               channels=channels)
+        else:
+            log.fatal(f'Invalid tracker type: {tracker_type}')
 
     # Adds or updates the tracker for address/tag with the channel_id. Returns
     # the DebtTracker object associated with this update.
+
     async def add_and_return_tracker(self, address: str, tag: Optional[str], channel_id: int) -> DebtTracker:
         # Find the matching tracker for address/tag (and if it doesn't exist,
         # create one).
@@ -149,14 +167,27 @@ class Config(object):
         for t in self.trackers:
             tracker_json = {}
 
-            tracker_json['address'] = t.get_address()
-            tag = t.get_tag()
-            if tag:
-                tracker_json['tag'] = tag
-            tracker_json['last_alert_time'] = utils.format_storage_time(
-                t.get_last_alert_time())
-            tracker_json['channels'] = t.get_channels()
-            tracker_json['ignorable_debts'] = t.get_ignorable_debts()
+            tracker_type = type(t).__name__
+            tracker_json['type'] = tracker_type
+
+            if tracker_type == DebtTracker.__name__:
+                tracker_json['address'] = t.get_address()
+                tag = t.get_tag()
+                if tag:
+                    tracker_json['tag'] = tag
+                tracker_json['last_alert_time'] = utils.format_storage_time(
+                    t.get_last_alert_time())
+                tracker_json['channels'] = t.get_channels()
+                tracker_json['ignorable_debts'] = t.get_ignorable_debts()
+            elif tracker_type == NameTracker.__name__:
+                tracker_json['user_id'] = t.get_user_id()
+                tracker_json['tag'] = t.get_tag()
+                tracker_json['last_alert_time'] = utils.format_storage_time(
+                    t.get_last_alert_time())
+                tracker_json['channels'] = t.get_channels()
+            else:
+                print(f'Could not save unsupported tracker: {tracker_type}')
+                continue
 
             config_dict['trackers'].append(tracker_json)
 
@@ -202,7 +233,7 @@ class AntlionDeFiBot(discord.Client):
 
         # Configuration state for the bot.
         assert 'config' in kwargs
-        self._config = Config(kwargs['config'])
+        self._config = Config(kwargs['config'], client=self)
 
         # Start update task.
         self.update_task.start()
@@ -228,7 +259,7 @@ class AntlionDeFiBot(discord.Client):
                                     urgent=False,
                                     wait_period_expired=False)
         if tracker_count == 0:
-            await channel.send(f'This channel is not tracking any wallets.')
+            await channel.send(f'This channel does not have any trackers.')
 
     def tracker_count_for_channel(self, channel_id: int) -> int:
         tracker_count = 0
@@ -244,7 +275,7 @@ class AntlionDeFiBot(discord.Client):
             channel = self.get_channel(channel_id)
             await channel.send('hello sers. I have returned.')
             await channel.send(USAGE.format(command=self._config.subscribe_command))
-            await channel.send(f'Number of wallets tracked: {self.tracker_count_for_channel(channel_id)}')
+            await channel.send(f'Number of trackers: {self.tracker_count_for_channel(channel_id)}')
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -289,10 +320,9 @@ class AntlionDeFiBot(discord.Client):
                 print(f'Subscribed to {channel_name} ({channel_id})')
                 await self.schedule_alerts_for_channel(message.channel)
 
-    # This loop periodically updates the DebtTracker with the latest debt
-    # information for the specified user. An alert is scheduled if the update
-    # returned has_alert == True, or if the maximum wait period has elapsed
-    # between datetime.now() and the tracker's last alert time.
+    # This loop periodically updates trackers. An alert is scheduled if the
+    # update returned has_alert == True, or if the maximum wait period has
+    # elapsed between datetime.now() and the tracker's last alert time.
     @tasks.loop(seconds=300)
     async def update_task(self):
         print(
@@ -388,7 +418,9 @@ class AntlionDeFiBot(discord.Client):
 
 
 def main(argv):
-    client = AntlionDeFiBot(config=FLAGS.config)
+    intents = discord.Intents.default()
+    intents.members = True
+    client = AntlionDeFiBot(config=FLAGS.config, intents=intents)
     client.run(client.get_token())
 
 
