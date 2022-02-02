@@ -13,7 +13,7 @@
 # > ./debt.py --address=0x3f3e305c4ad49271ebda489dd43d2c8f027d2d41 --tag=DeFiGod
 #
 # Requires Python version >= 3.6.
-# This script queries the Zapper API.
+# This script queries the DeBank API.
 # Creates a savefile CSV called <address>[-<tag>].csv to save results of recent
 # queries.
 
