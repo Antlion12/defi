@@ -15,6 +15,7 @@
 
 from absl import app
 from absl import flags
+from collections import defaultdict
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -41,10 +42,14 @@ flags.DEFINE_string('config', 'config.json',
 
 # Max amount of time to wait between broadcasting updates.
 WAIT_PERIOD_MINUTES = 8 * 60
-USAGE = '''You may check current debt positions by typing in the command: `!{command}`
-If you want to track a new wallet, please enter: `!{command} <address> <tag>`
-You may also wait for automatic updates.'''
+USAGE_DEBTTRACKER = 'Enter `!{command}` to check current debt positions.'
+USAGE_NAMETRACKER = 'Enter `!{command}` to check name tracker.'
 MAX_MESSAGE_LENGTH = 2000
+
+DEFAULT_SUBSCRIBE_COMMANDS = {
+    'defibot': 'DebtTracker',
+    'kangabot': 'NameTracker'
+}
 
 
 class Config(object):
@@ -61,6 +66,11 @@ class Config(object):
         self.max_wait_period = timedelta(minutes=WAIT_PERIOD_MINUTES)
         # List of trackers.
         self.trackers = []
+        # Map of subscribe commands to their respective tracker types.
+        self.subscribe_commands = {}
+        # Convenience map for mapping subscribe commands to their respective
+        # trackers.
+        self.command_to_trackers = {}
 
         # Load from disk.
         self.load_config()
@@ -70,15 +80,16 @@ class Config(object):
         with open(self._config_file) as f:
             config_json = json.loads(f.read())
 
-        # Configures bot to respond to '!<subscribe_command>' command.
-        # Otherwise, defaults to '!defibot'.
-        self.subscribe_command = config_json.get(
-            'subscribe_command', 'defibot')
-
         # Fetches the bot's token.
         self.token = config_json.get('token')
         # Discord bot's token must be defined.
         assert self.token
+
+        # Loads a map of subscribe commands to their respective tracker types.
+        self.subscribe_commands = config_json.get('subscribe_commands')
+        if not self.subscribe_commands:
+            self.subscribe_commands = DEFAULT_SUBSCRIBE_COMMANDS
+        assert self.subscribe_commands
 
         # Loads channels that the bot is subscribed to.
         if 'channels' in config_json:
@@ -93,16 +104,21 @@ class Config(object):
                 minutes=config_json['max_wait_period'])
 
         # Loads the trackers.
+        for command in self.subscribe_commands:
+            self.command_to_trackers[command] = []
         if 'trackers' in config_json:
             for tracker_json in config_json['trackers']:
                 self.trackers.append(self.parse_tracker(tracker_json))
+            for tracker in self.trackers:
+                self.command_to_trackers[tracker.get_subscribe_command()].append(
+                    tracker)
 
         print(f'Subscribed to these channels: {self.channels}')
         print(
             f'Max wait period {utils.format_timedelta(self.max_wait_period)} between alerts.')
         for tracker in self.trackers:
             print(
-                f'Tracking {tracker.get_name()}. Last update: {tracker.get_last_update_time()}. Last alert: {tracker.get_last_alert_time()}.')
+                f'Tracking {tracker.get_name()}. Last update: {tracker.get_last_update_time()}. Last alert: {tracker.get_last_alert_time()}. Command: {tracker.get_subscribe_command()}.')
 
     def parse_tracker(self, tracker_json: dict) -> DebtTracker:
         tracker_type = tracker_json['type']
@@ -110,19 +126,21 @@ class Config(object):
             address = tracker_json['address']
             tag = tracker_json.get('tag')
             last_alert_time = tracker_json.get('last_alert_time')
+            subscribe_command = tracker_json.get('subscribe_command')
             channels = tracker_json.get('channels')
             ignorable_debts = tracker_json.get('ignorable_debts')
-            return DebtTracker(address, tag, self.subscribe_command,
+            return DebtTracker(address, tag, subscribe_command,
                                last_alert_time, channels, ignorable_debts)
         elif tracker_type == NameTracker.__name__:
             user_id = tracker_json['user_id']
             tag = tracker_json['tag']
             last_alert_time = tracker_json.get('last_alert_time')
+            subscribe_command = tracker_json.get('subscribe_command')
             channels = tracker_json.get('channels')
             return NameTracker(client=self._client,
                                user_id=user_id,
                                tag=tag,
-                               subscribe_command=self.subscribe_command,
+                               subscribe_command=subscribe_command,
                                last_alert_time=last_alert_time,
                                channels=channels)
         else:
@@ -131,21 +149,36 @@ class Config(object):
     # Adds or updates the tracker for address/tag with the channel_id. Returns
     # the DebtTracker object associated with this update.
 
-    async def add_and_return_tracker(self, address: str, tag: Optional[str], channel_id: int) -> DebtTracker:
+    async def add_and_return_tracker(self, identifier: str, tag: Optional[str], command: str, channel_id: int) -> DebtTracker:
         # Find the matching tracker for address/tag (and if it doesn't exist,
         # create one).
         tracker = None
         for curr_tracker in self.trackers:
-            if (curr_tracker.get_address() == address and
+            if (curr_tracker.get_identifier() == identifier and
                     curr_tracker.get_tag() == tag):
                 tracker = curr_tracker
         if not tracker:
-            tracker = DebtTracker(address=address,
-                                  tag=tag,
-                                  subscribe_command=self.subscribe_command,
-                                  last_alert_time=None,
-                                  channels=None,
-                                  ignorable_debts=None)
+            if command not in self.subscribe_commands:
+                log.fatal(f'Command {command} not among subscribe commands')
+
+            if self.subscribe_commands[command] == DebtTracker.__name__:
+                tracker = DebtTracker(address=identifier,
+                                      tag=tag,
+                                      subscribe_command=command,
+                                      last_alert_time=None,
+                                      channels=None,
+                                      ignorable_debts=None)
+            elif self.subscribe_commands[command] == NameTracker.__name__:
+                tracker = NameTracker(client=self._client,
+                                      user_id=identifier,
+                                      tag=tag,
+                                      subscribe_command=command,
+                                      last_alert_time=None,
+                                      channels=None)
+            else:
+                log.fatal(
+                    f'For command {command}, invalid tracker type: {self.subscribe_commands[command]}')
+
             await tracker.update()  # Query new debts for the first time.
             self.trackers.append(tracker)
 
@@ -158,7 +191,7 @@ class Config(object):
 
     def save_config(self):
         config_dict = {
-            'subscribe_command': self.subscribe_command,
+            'subscribe_commands': self.subscribe_commands,
             'token': self.token,
             'channels': self.channels,
             'max_wait_period': self.max_wait_period.seconds // 60,
@@ -177,6 +210,7 @@ class Config(object):
                     tracker_json['tag'] = tag
                 tracker_json['last_alert_time'] = utils.format_storage_time(
                     t.get_last_alert_time())
+                tracker_json['subscribe_command'] = t.get_subscribe_command()
                 tracker_json['channels'] = t.get_channels()
                 tracker_json['ignorable_debts'] = t.get_ignorable_debts()
             elif tracker_type == NameTracker.__name__:
@@ -184,6 +218,7 @@ class Config(object):
                 tracker_json['tag'] = t.get_tag()
                 tracker_json['last_alert_time'] = utils.format_storage_time(
                     t.get_last_alert_time())
+                tracker_json['subscribe_command'] = t.get_subscribe_command()
                 tracker_json['channels'] = t.get_channels()
             else:
                 print(f'Could not save unsupported tracker: {tracker_type}')
@@ -250,23 +285,35 @@ class AntlionDeFiBot(discord.Client):
         self._alerts_queue.put(
             Alert(channel_id, message, urgent, wait_period_expired))
 
-    async def schedule_alerts_for_channel(self, channel: discord.TextChannel):
+    async def schedule_alerts_for_channel(self, channel: discord.TextChannel,
+                                          command: str, trackers: list):
         tracker_count = 0
-        for tracker in self._config.trackers:
-            if tracker.has_channel(channel.id):
+        for tracker in trackers:
+            if (tracker.has_channel(channel.id) and command == tracker.get_subscribe_command()):
                 tracker_count += 1
                 self.schedule_alert(channel.id, tracker.get_last_message(),
                                     urgent=False,
                                     wait_period_expired=False)
         if tracker_count == 0:
-            await channel.send(f'This channel does not have any trackers.')
+            await channel.send(f'This channel does not have any trackers for {command}.')
 
-    def tracker_count_for_channel(self, channel_id: int) -> int:
-        tracker_count = 0
+    def trackers_for_channel(self, channel_id: int) -> int:
+        tracker_names = []
+        tracker_output = ''
         for tracker in self._config.trackers:
             if tracker.has_channel(channel_id):
-                tracker_count += 1
-        return tracker_count
+                tracker_output += f'\n    * {tracker.get_name()}'
+        if not tracker_output:
+            tracker_output = 'None'
+        return tracker_output
+
+    async def send_usages(self, channel: discord.TextChannel):
+        for command, tracker_type in self._config.subscribe_commands.items():
+            if tracker_type == DebtTracker.__name__:
+                await channel.send(USAGE_DEBTTRACKER.format(command=command))
+            elif tracker_type == NameTracker.__name__:
+                await channel.send(USAGE_NAMETRACKER.format(command=command))
+        await channel.send('You may also wait for automatic updates.')
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name}#{self.user.discriminator}')
@@ -274,32 +321,33 @@ class AntlionDeFiBot(discord.Client):
         for channel_id in self._config.get_subscribed_channels():
             channel = self.get_channel(channel_id)
             await channel.send('hello sers. I have returned.')
-            await channel.send(USAGE.format(command=self._config.subscribe_command))
-            await channel.send(f'Number of trackers: {self.tracker_count_for_channel(channel_id)}')
+            await channel.send(f'Current trackers for this channel: {self.trackers_for_channel(channel_id)}')
+            await self.send_usages(channel)
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
             return
 
-        # Handles subscription commands (which add this channel to the set of
-        # channels that will be notified in future alerts).
-        if message.content.startswith(f'!{self._config.subscribe_command}'):
-            channel_id = message.channel.id
-            channel_name = f'{message.channel.guild.name}#{message.channel.name}'
+        channel_id = message.channel.id
+        channel_name = f'{message.channel.guild.name}#{message.channel.name}'
+        message_tokens = message.content.split()
+        for command, trackers in self._config.command_to_trackers.items():
+            if message_tokens[0] != f'!{command}':
+                continue
 
-            message_tokens = message.content.split()
-
+            # Handles subscription commands (which add this channel to the set of
+            # channels that will be notified in future alerts).
             if self._config.is_subscribed(channel_id) and len(message_tokens) > 1:
-                # Add/update a tracker for the given address and tag using this
+                # Add/update a tracker for the given identifier and tag using this
                 # channel.
-                address = message_tokens[1]
+                identifier = message_tokens[1]
                 tag = ' '.join(message_tokens[2:]) if len(
                     message_tokens) >= 3 else None
                 print(
-                    f'User {message.author} requested update on address {address}, tag {tag}.')
-                await message.channel.send(f'{message.author.mention} requested a tracker for {address} ({tag}). Coming right up...')
+                    f'User {message.author} requested update on {identifier} ({tag}).')
+                await message.channel.send(f'{message.author.mention} requested a tracker for {identifier} ({tag}). Coming right up...')
 
-                tracker = await self._config.add_and_return_tracker(address, tag, channel_id)
+                tracker = await self._config.add_and_return_tracker(identifier, tag, command, channel_id)
                 self.schedule_alert(channel_id, tracker.get_last_message(),
                                     urgent=False,
                                     wait_period_expired=False)
@@ -307,18 +355,18 @@ class AntlionDeFiBot(discord.Client):
                 # Already subscribed. Requesting update.
                 print(f'User {message.author} requested update.')
                 await message.channel.send(f'{message.author.mention} requested an update. Coming right up...')
-                await self.schedule_alerts_for_channel(message.channel)
+                await self.schedule_alerts_for_channel(message.channel, command, trackers)
             elif len(message_tokens) == 1:
                 # This is a new subscription.
                 self._config.subscribe_channel(channel_id, channel_name)
 
                 await message.channel.send('gm')
                 await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
-                await message.channel.send(USAGE.format(command=self._config.subscribe_command))
-                await message.channel.send('For now, I will share the current debts tracked in this channel.')
+                await self.send_usages(message.channel)
+                await message.channel.send('For now, I will share the current trackers in this channel.')
 
                 print(f'Subscribed to {channel_name} ({channel_id})')
-                await self.schedule_alerts_for_channel(message.channel)
+                await self.schedule_alerts_for_channel(message.channel, command, trackers)
 
     # This loop periodically updates trackers. An alert is scheduled if the
     # update returned has_alert == True, or if the maximum wait period has
