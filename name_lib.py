@@ -125,6 +125,9 @@ class NameTracker(object):
     def get_user_id(self) -> str:
         return self._user_id
 
+    def get_identifier(self) -> str:
+        return self.get_user_id()
+
     def get_tag(self) -> Optional[str]:
         return self._tag
 
@@ -146,6 +149,9 @@ class NameTracker(object):
     def add_channel(self, channel_id: int):
         self._channels.append(channel_id)
 
+    def get_subscribe_command(self) -> str:
+        return self._subscribe_command
+
     # Sets the last alert time to the last update time. This is useful when
     # there is some caller that is using a different criteria for triggering an
     # alert.
@@ -162,7 +168,7 @@ class NameTracker(object):
         if not name:
             return False, f'No name inferred for {self.get_name()}.'
 
-        message = f'**{self.get_name()}** tracker: Current name is **{name.name}**.'
+        message = f'**{self.get_name()}** tracker: Current name is **{name.name}** (as of {utils.display_time(name.time)} UTC).'
 
         # Update timestamps and messages.
         self._last_update_time = name.time
@@ -205,15 +211,17 @@ class NameTracker(object):
         # Get previous username.
         prev_name = _query_prev_name(savefile)
 
+        message = f'**{self.get_name()}** tracker: '
         if not prev_name:
             has_alert = True
-            message = f'**{self.get_name()}** tracker: Current name is **{name.name}**.'
+            message += f'Current name is **{name.name}**'
         elif prev_name.name != name.name:
             has_alert = True
-            message = f'**{self.get_name()}** tracker: The artist formerly known as **{prev_name.name}** is now known as **{name.name}**.'
+            message += f'The artist formerly known as **{prev_name.name}** is now known as **{name.name}**'
         else:
             has_alert = False
-            message = f'**{self.get_name()}** tracker: Current name for is still **{user.name}**.'
+            message += f'Current name for is still **{name.name}**'
+        message += f' (as of {utils.display_time(name.time)} UTC).'
 
         # Update timestamps and messages.
         self._last_update_time = name.time
