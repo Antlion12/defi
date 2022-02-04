@@ -424,6 +424,9 @@ class DebtTracker(object):
     def get_address(self) -> str:
         return self._address
 
+    def get_identifier(self) -> str:
+        return self.get_address()
+
     def get_tag(self) -> Optional[str]:
         return self._tag
 
@@ -447,6 +450,9 @@ class DebtTracker(object):
 
     def get_ignorable_debts(self) -> List[str]:
         return self._ignorable_debts
+
+    def get_subscribe_command(self) -> str:
+        return self._subscribe_command
 
     # Sets the last alert time to the last update time. This is useful when
     # there is some caller that is using a different criteria for triggering an
