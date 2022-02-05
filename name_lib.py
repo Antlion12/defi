@@ -220,7 +220,7 @@ class NameTracker(object):
             message += f'The artist formerly known as **{prev_name.name}** is now known as **{name.name}**'
         else:
             has_alert = False
-            message += f'Current name for is still **{name.name}**'
+            message += f'Current name is still **{name.name}**'
         message += f' (as of {utils.display_time(name.time)} UTC).'
 
         # Update timestamps and messages.
