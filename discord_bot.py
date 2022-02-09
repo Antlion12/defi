@@ -21,6 +21,7 @@ from datetime import timedelta
 from datetime import timezone
 from debt_lib import DebtTracker
 from discord.ext import tasks
+from link_lib import LinkTracker
 from name_lib import NameTracker
 from pathlib import Path
 from typing import List
@@ -44,11 +45,13 @@ flags.DEFINE_string('config', 'config.json',
 WAIT_PERIOD_MINUTES = 8 * 60
 USAGE_DEBTTRACKER = 'Enter `!{command}` to check current debt positions.'
 USAGE_NAMETRACKER = 'Enter `!{command}` to check name tracker.'
+USAGE_LINKTRACKER = 'Enter `!{command}` to check LINK tracker.'
 MAX_MESSAGE_LENGTH = 2000
 
 DEFAULT_SUBSCRIBE_COMMANDS = {
     'defibot': 'DebtTracker',
-    'kangabot': 'NameTracker'
+    'kangabot': 'NameTracker',
+    'linkbot': 'LinkTracker'
 }
 
 
@@ -143,6 +146,13 @@ class Config(object):
                                subscribe_command=subscribe_command,
                                last_alert_time=last_alert_time,
                                channels=channels)
+        elif tracker_type == LinkTracker.__name__:
+            last_alert_time = tracker_json.get('last_alert_time')
+            subscribe_command = tracker_json.get('subscribe_command')
+            channels = tracker_json.get('channels')
+            return LinkTracker(subscribe_command=subscribe_command,
+                               last_alert_time=last_alert_time,
+                               channels=channels)
         else:
             log.fatal(f'Invalid tracker type: {tracker_type}')
 
@@ -173,6 +183,10 @@ class Config(object):
                                       user_id=identifier,
                                       tag=tag,
                                       subscribe_command=command,
+                                      last_alert_time=None,
+                                      channels=None)
+            elif self.subscribe_commands[command] == LinkTracker.__name__:
+                tracker = LinkTracker(subscribe_command=command,
                                       last_alert_time=None,
                                       channels=None)
             else:
@@ -216,6 +230,11 @@ class Config(object):
             elif tracker_type == NameTracker.__name__:
                 tracker_json['user_id'] = t.get_user_id()
                 tracker_json['tag'] = t.get_tag()
+                tracker_json['last_alert_time'] = utils.format_storage_time(
+                    t.get_last_alert_time())
+                tracker_json['subscribe_command'] = t.get_subscribe_command()
+                tracker_json['channels'] = t.get_channels()
+            elif tracker_type == LinkTracker.__name__:
                 tracker_json['last_alert_time'] = utils.format_storage_time(
                     t.get_last_alert_time())
                 tracker_json['subscribe_command'] = t.get_subscribe_command()
@@ -313,6 +332,8 @@ class AntlionDeFiBot(discord.Client):
                 await channel.send(USAGE_DEBTTRACKER.format(command=command))
             elif tracker_type == NameTracker.__name__:
                 await channel.send(USAGE_NAMETRACKER.format(command=command))
+            elif tracker_type == LinkTracker.__name__:
+                await channel.send(USAGE_LINKTRACKER.format(command=command))
         await channel.send('You may also wait for automatic updates.')
 
     async def on_ready(self):
