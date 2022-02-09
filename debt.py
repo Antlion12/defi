@@ -28,7 +28,7 @@ flags.DEFINE_string('tag', None, 'Human readable name for wallet.')
 flags.mark_flag_as_required('address')
 
 
-async def run_tracker(tracker):
+async def run_tracker(tracker: DebtTracker):
     await tracker.update()
     print(tracker.get_last_message())
 
