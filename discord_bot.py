@@ -2,16 +2,12 @@
 
 # This script launches the Antlion DeFi Discord bot.
 #
-# Your initial JSON config file (default path "config.json") must have the
-# following field:
+# Your initial JSON config file (default path "config.json") can be based on the
+# example provided in "sample_config.json".
 #
-# {
-#   "token": <bot's discord token>
-# }
-#
-# Users who want to subscribe to the bot can type "!defibot" in their channel of
-# choice. This subscription information will be stored in the config for future
-# runs of the bot.
+# Users who want to subscribe to the bot can type "!defibot" (or similar
+# commands) in their channel of choice. This subscription information will be
+# stored in the config for future runs of the bot.
 
 from absl import app
 from absl import flags

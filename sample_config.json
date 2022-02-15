@@ -1,0 +1,41 @@
+{
+    "subscribe_commands": {
+        "defibot": "DebtTracker",
+        "linkbot": "LinkTracker"
+    },
+    "token": "<YOUR BOT'S DISCORD TOKEN>",
+    "channels": {
+    },
+    "max_wait_period": 720,
+    "trackers": [
+        {
+            "type": "DebtTracker",
+            "address": "0x3f3e305c4ad49271ebda489dd43d2c8f027d2d41",
+            "tag": "DeFiGod",
+            "subscribe_command": "defibot",
+            "channels": [
+            ],
+            "ignorable_debts": []
+        },
+        {
+            "type": "DebtTracker",
+            "address": "0x9c5083dd4838e120dbeac44c052179692aa5dac5",
+            "tag": "TetraNode",
+            "subscribe_command": "defibot",
+            "channels": [
+            ],
+            "ignorable_debts": []
+        },
+        {
+            "type": "DebtTracker",
+            "address": "0xcba1a275e2d858ecffaf7a87f606f74b719a8a93",
+            "tag": "Farming God",
+            "subscribe_command": "defibot",
+            "channels": [
+            ],
+            "ignorable_debts": [
+                "Abracadabra (eth), supply xSUSHI"
+            ]
+        }
+    ]
+}
