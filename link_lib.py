@@ -149,9 +149,14 @@ def _prepare_message(prices: Prices) -> Tuple[bool, str]:
 
 class LinkTracker(object):
     def __init__(self,
+                 identifier: str,
+                 tag: str,
                  subscribe_command: str,
                  last_alert_time: Optional[str],
                  channels: Optional[List[int]]):
+        # Identifier and tag info.
+        self._identifier = identifier
+        self._tag = tag
         # Subscribe command for the bot invoking this tracker.
         self._subscribe_command = subscribe_command
         # Path for saving the data for this tracker.
@@ -184,10 +189,13 @@ class LinkTracker(object):
         self._get_last_update()
 
     def get_name(self) -> str:
-        return 'LINK PUMP'
+        return self._identifier
 
     def get_identifier(self) -> str:
         return self.get_name()
+
+    def get_tag(self) -> str:
+        return self._tag
 
     def get_last_update_time(self) -> datetime:
         return self._last_update_time

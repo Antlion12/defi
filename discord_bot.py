@@ -147,19 +147,22 @@ class Config(object):
                                last_alert_time=last_alert_time,
                                channels=channels)
         elif tracker_type == LinkTracker.__name__:
+            identifier = tracker_json.get('identifier')
+            tag = tracker_json.get('tag')
             last_alert_time = tracker_json.get('last_alert_time')
             subscribe_command = tracker_json.get('subscribe_command')
             channels = tracker_json.get('channels')
-            return LinkTracker(subscribe_command=subscribe_command,
+            return LinkTracker(identifier=identifier,
+                               tag=tag,
+                               subscribe_command=subscribe_command,
                                last_alert_time=last_alert_time,
                                channels=channels)
         else:
             log.fatal(f'Invalid tracker type: {tracker_type}')
 
     # Adds or updates the tracker for address/tag with the channel_id. Returns
-    # the DebtTracker object associated with this update.
-
-    async def add_and_return_tracker(self, identifier: str, tag: Optional[str], command: str, channel_id: int) -> DebtTracker:
+    # the tracker object associated with this update.
+    async def add_and_return_tracker(self, identifier: str, tag: Optional[str], command: str, channel_id: int):
         # Find the matching tracker for address/tag (and if it doesn't exist,
         # create one).
         tracker = None
@@ -186,7 +189,9 @@ class Config(object):
                                       last_alert_time=None,
                                       channels=None)
             elif self.subscribe_commands[command] == LinkTracker.__name__:
-                tracker = LinkTracker(subscribe_command=command,
+                tracker = LinkTracker(identifier=identifier,
+                                      tag=tag,
+                                      subscribe_command=command,
                                       last_alert_time=None,
                                       channels=None)
             else:
@@ -235,6 +240,8 @@ class Config(object):
                 tracker_json['subscribe_command'] = t.get_subscribe_command()
                 tracker_json['channels'] = t.get_channels()
             elif tracker_type == LinkTracker.__name__:
+                tracker_json['identifier'] = t.get_identifier()
+                tracker_json['tag'] = t.get_tag()
                 tracker_json['last_alert_time'] = utils.format_storage_time(
                     t.get_last_alert_time())
                 tracker_json['subscribe_command'] = t.get_subscribe_command()
@@ -308,6 +315,7 @@ class AntlionDeFiBot(discord.Client):
                                           command: str, trackers: list):
         tracker_count = 0
         for tracker in trackers:
+            print(f'Comparing {tracker} with command {command}')
             if (tracker.has_channel(channel.id) and command == tracker.get_subscribe_command()):
                 tracker_count += 1
                 self.schedule_alert(channel.id, tracker.get_last_message(),
