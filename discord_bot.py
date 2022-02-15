@@ -110,6 +110,7 @@ class Config(object):
         for command in self.subscribe_commands:
             self.command_to_trackers[command] = []
         if 'trackers' in config_json:
+            # Update trackers list and command-to-tracker map.
             for tracker_json in config_json['trackers']:
                 self.trackers.append(self.parse_tracker(tracker_json))
             for tracker in self.trackers:
@@ -199,7 +200,10 @@ class Config(object):
                     f'For command {command}, invalid tracker type: {self.subscribe_commands[command]}')
 
             await tracker.update()  # Query new debts for the first time.
+            # Update trackers list and command-to-tracker map.
             self.trackers.append(tracker)
+            self.command_to_trackers[tracker.get_subscribe_command()].append(
+                tracker)
 
         # Add the channel info to the tracker if it doesn't already exist.
         if not tracker.has_channel(channel_id):
