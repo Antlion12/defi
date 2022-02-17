@@ -176,7 +176,7 @@ class Config(object):
                                       tag=tag,
                                       subscribe_command=command,
                                       last_alert_time=None,
-                                      channels=None,
+                                      channels=[channel_id],
                                       ignorable_debts=None)
             elif self.subscribe_commands[command] == NameTracker.__name__:
                 tracker = NameTracker(client=self._client,
@@ -184,13 +184,13 @@ class Config(object):
                                       tag=tag,
                                       subscribe_command=command,
                                       last_alert_time=None,
-                                      channels=None)
+                                      channels=[channel_id])
             elif self.subscribe_commands[command] == LinkTracker.__name__:
                 tracker = LinkTracker(identifier=identifier,
                                       tag=tag,
                                       subscribe_command=command,
                                       last_alert_time=None,
-                                      channels=None)
+                                      channels=[channel_id])
             else:
                 log.fatal(
                     f'For command {command}, invalid tracker type: {self.subscribe_commands[command]}')
