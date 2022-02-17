@@ -180,7 +180,7 @@ class Config(object):
                                       ignorable_debts=None)
             elif self.subscribe_commands[command] == NameTracker.__name__:
                 tracker = NameTracker(client=self._client,
-                                      user_id=identifier,
+                                      user_id=int(identifier),
                                       tag=tag,
                                       subscribe_command=command,
                                       last_alert_time=None,
