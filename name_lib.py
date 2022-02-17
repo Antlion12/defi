@@ -77,7 +77,7 @@ def _write_name(name: Name, savefile: str):
 class NameTracker(object):
     def __init__(self,
                  client: discord.Client,
-                 user_id: int,
+                 user_id: str,
                  tag: str,
                  subscribe_command: str,
                  last_alert_time: Optional[str],
@@ -191,7 +191,7 @@ class NameTracker(object):
         member = None
         for channel_id in self._channels:
             channel = self._client.get_channel(channel_id)
-            member = await channel.guild.fetch_member(user_id)
+            member = await channel.guild.fetch_member(int(user_id))
             print(f'Found member: {member}')
             if member:
                 break
