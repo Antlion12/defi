@@ -140,7 +140,8 @@ def _prepare_message(prices: Prices) -> Tuple[bool, str]:
     print('```', file=output)
 
     message = output.getvalue()
-    has_alert = prices.link_vs_eth >= ALERT_THRESHOLD
+    has_alert = ((prices.link_vs_eth >= ALERT_THRESHOLD) and
+                 (prices.eth_change >= 0))
     if has_alert:
         message = '🚨⛓️ LINK IS PUMPING. Will we get a dumping? ' + message
 
