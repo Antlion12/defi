@@ -6,6 +6,7 @@
 
 from absl import logging
 from datetime import datetime
+from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
 from utils import display_time
@@ -128,7 +129,7 @@ async def _get_prices() -> Prices:
                   link_vs_eth=link_vs_eth)
 
 
-def _prepare_message(prices: Prices) -> Tuple[bool, str]:
+def _prepare_message(prices: Prices, last_alert_time: datetime) -> Tuple[bool, str]:
     output = io.StringIO()
     print(f'LINK vs ETH: {prices.link_vs_eth * 100:+.2f}%', file=output)
     print('```', file=output)
@@ -140,8 +141,11 @@ def _prepare_message(prices: Prices) -> Tuple[bool, str]:
     print('```', file=output)
 
     message = output.getvalue()
+    # At least 3 hours elapsed since last alert.
+    internal_wait_period_expired = (
+        datetime.now(timezone.utc) - last_alert_time >= timedelta(minutes=180))
     has_alert = ((prices.link_vs_eth >= ALERT_THRESHOLD) and
-                 (prices.eth_change >= 0))
+                 (prices.eth_change >= 0) and internal_wait_period_expired)
     if has_alert:
         message = '🚨⛓️ LINK IS PUMPING. Will we get a dumping? ' + message
 
@@ -235,7 +239,7 @@ class LinkTracker(object):
         if not prices:
             return False, f'No prices available for {self.get_name()}.'
 
-        _, message = _prepare_message(prices)
+        _, message = _prepare_message(prices, self._last_alert_time)
 
         # Update timestamps and messages.
         self._last_update_time = prices.time
@@ -255,7 +259,7 @@ class LinkTracker(object):
         # Get current prices.
         prices = await _get_prices()
 
-        has_alert, message = _prepare_message(prices)
+        has_alert, message = _prepare_message(prices, self._last_alert_time)
 
         # Update timestamps and messages.
         self._last_update_time = prices.time
