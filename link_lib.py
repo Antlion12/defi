@@ -150,7 +150,7 @@ def _prepare_message(prices: Prices, last_alert_time: datetime) -> Tuple[bool, s
         datetime.now(timezone.utc) - last_alert_time >= timedelta(minutes=180))
     # Keep the alert message, but set has_alert to false since there has already
     # been a recent alert.
-    if internal_wait_period_expired:
+    if not internal_wait_period_expired:
         has_alert = False
 
     return has_alert, message
