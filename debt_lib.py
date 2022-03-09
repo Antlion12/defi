@@ -299,7 +299,7 @@ def _get_alert_message(prev_debts: DebtPosition, debts: DebtPosition, ignorable_
     large_ltv_decrease = False
     for diff in _iterate_individual_diffs(prev_debts, debts):
         if diff.display_name in ignorable_debts:
-            print(f'Ignored alert check for this position: {display_name}')
+            print(f'Ignored alert check for this position: {diff.display_name}')
             continue
 
         if diff.change_usd >= LARGE_INDIVIDUAL_CHANGE:
@@ -349,7 +349,7 @@ def _print_debt_comparison(prev_debts: DebtPosition, debts: DebtPosition, ignora
     printed_notable_change_header = False
     for diff in _iterate_individual_diffs(prev_debts, debts):
         if diff.display_name in ignorable_debts:
-            print(f'Ignored debt comparison for this position: {display_name}')
+            print(f'Ignored debt comparison for this position: {diff.display_name}')
             continue
         if (abs(diff.change_usd) >= LARGE_INDIVIDUAL_CHANGE or
                 abs(diff.curr_ltv - diff.prev_ltv) >= LARGE_LTV_CHANGE):
