@@ -360,6 +360,9 @@ class AntlionDeFiBot(discord.Client):
         channel_id = message.channel.id
         channel_name = f'{message.channel.guild.name}#{message.channel.name}'
         message_tokens = message.content.split()
+        if not message_tokens:
+            # No message tokens to process.
+            return
         for command, trackers in self._config.command_to_trackers.items():
             if message_tokens[0] != f'!{command}':
                 continue
