@@ -403,7 +403,7 @@ class AntlionDeFiBot(discord.Client):
     # This loop periodically updates trackers. An alert is scheduled if the
     # update returned has_alert == True, or if the maximum wait period has
     # elapsed between datetime.now() and the tracker's last alert time.
-    @tasks.loop(seconds=300)
+    @tasks.loop(seconds=600)
     async def update_task(self):
         print(
             f'Running update task at {utils.display_time(datetime.now(timezone.utc))} UTC.')

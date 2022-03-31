@@ -143,15 +143,9 @@ def _prepare_message(prices: Prices, last_alert_time: datetime) -> Tuple[bool, s
     message = output.getvalue()
     # At least 3 hours elapsed since last alert.
     has_alert = ((prices.link_vs_eth >= ALERT_THRESHOLD) and
-                 (prices.eth_change >= 0) and internal_wait_period_expired)
+                 (prices.link_change >= 0))
     if has_alert:
         message = '🚨⛓️ LINK IS PUMPING. Will we get a dumping? ' + message
-    internal_wait_period_expired = (
-        datetime.now(timezone.utc) - last_alert_time >= timedelta(minutes=180))
-    # Keep the alert message, but set has_alert to false since there has already
-    # been a recent alert.
-    if not internal_wait_period_expired:
-        has_alert = False
 
     return has_alert, message
 
