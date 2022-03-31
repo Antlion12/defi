@@ -388,17 +388,17 @@ class AntlionDeFiBot(discord.Client):
                 print(f'User {message.author} requested update.')
                 await message.channel.send(f'{message.author.mention} requested an update. Coming right up...')
                 await self.schedule_alerts_for_channel(message.channel, command, trackers)
-            elif len(message_tokens) == 1:
-                # This is a new subscription.
-                self._config.subscribe_channel(channel_id, channel_name)
+            #elif len(message_tokens) == 1:
+            #    # This is a new subscription.
+            #    self._config.subscribe_channel(channel_id, channel_name)
 
-                await message.channel.send('gm')
-                await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
-                await self.send_usages(message.channel)
-                await message.channel.send('For now, I will share the current trackers in this channel.')
+            #    await message.channel.send('gm')
+            #    await message.channel.send('You have subscribed to updates from the Antlion DeFi Bot.')
+            #    await self.send_usages(message.channel)
+            #    await message.channel.send('For now, I will share the current trackers in this channel.')
 
-                print(f'Subscribed to {channel_name} ({channel_id})')
-                await self.schedule_alerts_for_channel(message.channel, command, trackers)
+            #    print(f'Subscribed to {channel_name} ({channel_id})')
+            #    await self.schedule_alerts_for_channel(message.channel, command, trackers)
 
     # This loop periodically updates trackers. An alert is scheduled if the
     # update returned has_alert == True, or if the maximum wait period has
