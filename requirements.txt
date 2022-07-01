@@ -1,3 +1,3 @@
 absl-py
 httpx
-pycord
+py-cord
