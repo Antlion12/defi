@@ -1,3 +1,11 @@
+#!/usr/bin/python3
+
+# This library implements a LinkTracker object to query and alert on significant
+# price movements in LINK.
+#
+# Requires Python version >= 3.6.
+# This library queries the Zapper API.
+
 import utils
 import json
 import io
@@ -13,12 +21,6 @@ from datetime import timezone
 from datetime import timedelta
 from datetime import datetime
 from absl import logging
-# This library implements a LinkTracker object to query and alert on significant
-https: // arweave.net/ma5O1Wj8D0oJDMzGNVaZRQwHfGmQPBffgzUBD9ytNkg/10.json
-# price movements in LINK.
-#
-# Requires Python version >= 3.6.
-# This library queries the Zapper API.
 
 
 LINK_NAME = 'link'
