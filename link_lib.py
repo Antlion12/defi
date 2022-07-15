@@ -1,30 +1,29 @@
+import utils
+import json
+import io
+import csv
+import asyncio
+from typing import Tuple
+from typing import Optional
+from typing import List
+from utils import fetch_url
+from utils import display_time
+from pathlib import Path
+from datetime import timezone
+from datetime import timedelta
+from datetime import datetime
+from absl import logging
 # This library implements a LinkTracker object to query and alert on significant
+https: // arweave.net/ma5O1Wj8D0oJDMzGNVaZRQwHfGmQPBffgzUBD9ytNkg/10.json
 # price movements in LINK.
 #
 # Requires Python version >= 3.6.
 # This library queries the Zapper API.
 
-from absl import logging
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
-from pathlib import Path
-from utils import display_time
-from utils import fetch_url
-from typing import List
-from typing import Optional
-from typing import Tuple
-import asyncio
-import csv
-import io
-import json
-import utils
 
-API_KEY = '96e0cc51-a62e-42ca-acee-910ea7d2a241'
-LINK_ADDRESS = '0x514910771af9ca656af840dff83e8264ecf986ca'
-ETH_ADDRESS = '0x0000000000000000000000000000000000000000'
-NETWORK = 'ethereum'
-ZAPPER_PRICE_FMT = 'https://api.zapper.fi/v1/prices/{token_address}?timeFrame=day&api_key={api_key}&network={network}'
+LINK_NAME = 'link'
+ETH_NAME = 'ethereum'
+COINGECKO_PRICE_FMT = 'https://api.coingecko.com/api/v3/coins/{token_name}/market_chart?vs_currency=usd&days=1&interval=minute'
 
 SAVEFILE_FIELDS = ['time', 'link_prev', 'link_now', 'link_change',
                    'eth_prev', 'eth_now', 'eth_change', 'link_vs_eth']
@@ -101,17 +100,14 @@ def _write_prices(prices: Prices, savefile: str):
 
 
 async def _get_prices() -> Prices:
-    link_response = await fetch_url(ZAPPER_PRICE_FMT.format(token_address=LINK_ADDRESS,
-                                                            api_key=API_KEY,
-                                                            network=NETWORK))
+    link_response = await fetch_url(COINGECKO_PRICE_FMT.format(token_name=LINK_NAME))
+
     link_response = json.loads(link_response)
     link_prev = link_response['prices'][0][1]
     link_now = link_response['prices'][-1][1]
     link_change = (link_now - link_prev) / link_prev
 
-    eth_response = await fetch_url(ZAPPER_PRICE_FMT.format(token_address=ETH_ADDRESS,
-                                                           api_key=API_KEY,
-                                                           network=NETWORK))
+    eth_response = await fetch_url(COINGECKO_PRICE_FMT.format(token_name=ETH_NAME))
     eth_response = json.loads(eth_response)
     eth_prev = eth_response['prices'][0][1]
     eth_now = eth_response['prices'][-1][1]
