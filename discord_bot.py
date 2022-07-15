@@ -388,7 +388,7 @@ class AntlionDeFiBot(discord.Client):
                 print(f'User {message.author} requested update.')
                 await message.channel.send(f'{message.author.mention} requested an update. Coming right up...')
                 await self.schedule_alerts_for_channel(message.channel, command, trackers)
-            #elif len(message_tokens) == 1:
+            # elif len(message_tokens) == 1:
             #    # This is a new subscription.
             #    self._config.subscribe_channel(channel_id, channel_name)
 
