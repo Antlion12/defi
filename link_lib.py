@@ -23,7 +23,7 @@ from datetime import datetime
 from absl import logging
 
 
-LINK_NAME = 'link'
+LINK_NAME = 'chainlink'
 ETH_NAME = 'ethereum'
 COINGECKO_PRICE_FMT = 'https://api.coingecko.com/api/v3/coins/{token_name}/market_chart?vs_currency=usd&days=1&interval=minute'
 
